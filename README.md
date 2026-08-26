@@ -78,3 +78,11 @@ role, the configurable event-type taxonomy (seeded with a baseline set), and eve
 
 `Dockerfile` builds a runnable image (`docker build -t flowkeeper-api .`); used by
 `flowkeeper-infra`'s production Compose file via `${API_IMAGE}`.
+
+## CI/CD
+
+`.github/workflows/ci.yml`: every PR runs `./mvnw verify` (unit + Testcontainers
+integration tests, against a real Docker daemon on the runner). Every merge to
+`main` additionally builds and pushes the image to `ghcr.io/adez90/flowkeeper-api`
+and deploys it to the staging server over SSH. See `flowkeeper-infra`'s
+`DEPLOYMENT.md` for the server setup and required secrets.
