@@ -32,14 +32,26 @@ Owned entirely by Flyway (`src/main/resources/db/migration`) — Hibernate is se
 (Personal or Organisation), the Department/Group hierarchy, account membership +
 role, the configurable event-type taxonomy (seeded with a baseline set), and events.
 
+## Conventions
+
+- **Logging**: SLF4J via each class's own `Logger`. `se.flowkeeper` defaults to
+  INFO in `application.yml` — business-relevant events (a user registered, an
+  event completed) log at INFO, detail at DEBUG, genuine inconsistencies at
+  ERROR. Raise `se.flowkeeper` to DEBUG locally rather than lowering `root`.
+- **Testing**: every vertical slice gets a fast unit test against the service
+  logic (Mockito, no Spring context) and an end-to-end test through real HTTP
+  + a real, Flyway-migrated Postgres (Testcontainers, via `AbstractIntegrationTest`).
+  See `registration/` for the pattern to follow.
+
 ## What's here vs. what's next
 
 - [x] Project skeleton, OAuth2 resource server security config (deny-by-default)
 - [x] Core schema migration (accounts, departments, groups, users, event types, events)
-- [ ] Domain entities/repositories/services for the schema above
-- [ ] Real REST endpoints + generated OpenAPI spec
-- [ ] Testcontainers-backed integration tests (the placeholder test in
-      `src/test` is intentionally not a real one yet — see its comment)
+- [x] Registration: first-login provisioning of a User + Personal account + OWNER
+      membership (`POST /api/v1/registration`), unit + integration tested
+- [ ] Real domain endpoints for Events (log one, close it out, day/week/month rollups)
+- [ ] Organisation/Department/Group management endpoints
+- [ ] Generated OpenAPI spec for the web/mobile clients
 
 ## Docker
 

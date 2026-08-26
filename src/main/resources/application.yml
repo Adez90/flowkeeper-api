@@ -31,3 +31,13 @@ management:
     health:
       probes:
         enabled: true
+
+logging:
+  level:
+    root: WARN
+    # Our own code: business-relevant events at INFO (a user registered, an
+    # event completed), detail at DEBUG. Raise se.flowkeeper to DEBUG when
+    # running locally, not by lowering the root level.
+    se.flowkeeper: INFO
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN
