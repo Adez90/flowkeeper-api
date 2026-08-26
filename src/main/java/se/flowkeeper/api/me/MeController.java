@@ -1,0 +1,28 @@
+package se.flowkeeper.api.me;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class MeController {
+
+	private final MeService meService;
+
+	public MeController(MeService meService) {
+		this.meService = meService;
+	}
+
+	/**
+	 * A 404 here means this Keycloak subject has never registered —
+	 * clients should call POST /api/v1/registration first, then retry.
+	 */
+	@GetMapping("/api/v1/me")
+	public ResponseEntity<MeResponse> me(Jwt jwt) {
+		return meService.currentUser(jwt)
+			.map(ResponseEntity::ok)
+			.orElseGet(() -> ResponseEntity.notFound().build());
+	}
+
+}
