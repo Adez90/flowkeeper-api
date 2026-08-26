@@ -25,6 +25,10 @@ Confirm it's alive: `GET http://localhost:8080/actuator/health` (public). Confir
 is wired end-to-end: `GET http://localhost:8080/api/v1/ping` with a Keycloak-issued
 bearer token — returns the token's subject.
 
+Browse and try every endpoint at `http://localhost:8080/swagger-ui.html` — the docs
+page itself is public, but calling an endpoint from it still needs a real token
+pasted into "Authorize" (get one from the local Keycloak realm).
+
 ## Schema
 
 Owned entirely by Flyway (`src/main/resources/db/migration`) — Hibernate is set to
@@ -56,10 +60,16 @@ role, the configurable event-type taxonomy (seeded with a baseline set), and eve
       (`GET /api/v1/events?accountId=&status=`), and the type picker
       (`GET /api/v1/event-types?accountId=`) — everything the "landing page"
       (ongoing events + create) needs
-- [ ] Day/week/month statistics rollups (the separate stats view a client
-      navigates to from the landing page)
-- [ ] Organisation/Department/Group management endpoints
-- [ ] Generated OpenAPI spec for the web/mobile clients
+- [x] Personal statistics: day/week/month rollups
+      (`GET /api/v1/statistics/personal?accountId=&period=&date=`) — total/open/
+      completed counts, average ingoing energy, average energy delta (outgoing
+      minus ingoing — the "did this net energize or drain you" signal), broken
+      down by event type
+- [x] OpenAPI spec + Swagger UI (`springdoc-openapi`) — browsable at
+      `/swagger-ui.html`, spec at `/v3/api-docs`; this is also what the
+      web/mobile clients will later generate typed API clients from
+- [ ] Organisation-wide statistics + an admin/manager view — needs the sharing
+      and visibility model decided first (see the Blueprint's "Still open")
 
 ## Docker
 
