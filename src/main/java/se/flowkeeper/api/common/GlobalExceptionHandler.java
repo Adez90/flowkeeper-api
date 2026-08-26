@@ -31,4 +31,11 @@ public class GlobalExceptionHandler {
 			.body(ApiError.of(ex.getMessage(), HttpStatus.CONFLICT.value()));
 	}
 
+	@ExceptionHandler(ValidationException.class)
+	public ResponseEntity<ApiError> handleValidation(ValidationException ex) {
+		log.debug("Validation failed: {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+			.body(ApiError.of(ex.getMessage(), HttpStatus.BAD_REQUEST.value()));
+	}
+
 }

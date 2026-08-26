@@ -7,6 +7,9 @@ public record MeResponse(
 	UUID userId,
 	String displayName,
 	String email,
+	String timezone,
+	String locale,
+	String avatarUrl,
 	List<AccountSummary> accounts
 ) {
 

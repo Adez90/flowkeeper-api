@@ -10,8 +10,10 @@ import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
 
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -40,14 +42,12 @@ public class StatisticsService {
 			.orElseThrow(() -> new AccessDeniedException(
 				"User %s is not a member of account %s".formatted(user.getId(), accountId)));
 
-		// UTC for now — there's no per-user timezone preference stored yet.
-		// A "day" here is a UTC day, not the user's local day; worth
-		// revisiting once that preference exists.
-		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(ZoneOffset.UTC);
+		ZoneId zone = resolveZone(user);
+		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(zone);
 		LocalDate rangeStart = period.startOf(date);
 		LocalDate rangeEnd = period.endOf(date);
-		Instant start = rangeStart.atStartOfDay(ZoneOffset.UTC).toInstant();
-		Instant end = rangeEnd.atStartOfDay(ZoneOffset.UTC).toInstant();
+		Instant start = rangeStart.atStartOfDay(zone).toInstant();
+		Instant end = rangeEnd.atStartOfDay(zone).toInstant();
 
 		OverallCounts overall = eventStatisticsRepository.aggregateOverall(accountId, start, end);
 		List<TypeBreakdown> byType = eventStatisticsRepository.aggregateByType(accountId, start, end).stream()
@@ -57,14 +57,25 @@ public class StatisticsService {
 		long total = overall.total() != null ? overall.total() : 0L;
 		long completed = overall.completed() != null ? overall.completed() : 0L;
 
-		log.debug("Computed {} statistics for account {} over [{}, {}): {} event(s), {} completed",
-			period, accountId, rangeStart, rangeEnd, total, completed);
+		log.debug("Computed {} statistics for account {} over [{}, {}) in {}: {} event(s), {} completed",
+			period, accountId, rangeStart, rangeEnd, zone, total, completed);
 
 		return new PersonalStatisticsResponse(
 			period, rangeStart, rangeEnd,
 			total, completed, total - completed,
 			overall.averageIngoingEnergy(), overall.averageEnergyDelta(),
 			byType);
+	}
+
+	private ZoneId resolveZone(User user) {
+		try {
+			return ZoneId.of(user.getTimezone());
+		} catch (DateTimeException e) {
+			// Shouldn't happen — timezone is validated on write — but a
+			// "day" still has to mean something if it somehow does.
+			log.warn("User {} has an invalid stored timezone '{}', falling back to UTC", user.getId(), user.getTimezone());
+			return ZoneOffset.UTC;
+		}
 	}
 
 }

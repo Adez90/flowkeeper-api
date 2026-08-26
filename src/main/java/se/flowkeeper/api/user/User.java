@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -33,8 +34,20 @@ public class User {
 	@Column(name = "email", nullable = false, length = 320)
 	private String email;
 
+	@Column(name = "timezone", nullable = false, length = 50)
+	private String timezone;
+
+	@Column(name = "locale", length = 10)
+	private String locale;
+
+	@Column(name = "avatar_url", length = 500)
+	private String avatarUrl;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
+
+	@Column(name = "updated_at", nullable = false)
+	private Instant updatedAt;
 
 	protected User() {
 	}
@@ -43,13 +56,28 @@ public class User {
 		this.keycloakSubject = keycloakSubject;
 		this.displayName = displayName;
 		this.email = email;
+		this.timezone = "UTC";
+	}
+
+	public void updateProfile(String displayName, String timezone, String locale, String avatarUrl) {
+		this.displayName = displayName;
+		this.timezone = timezone;
+		this.locale = locale;
+		this.avatarUrl = avatarUrl;
 	}
 
 	@PrePersist
 	void onCreate() {
+		Instant now = Instant.now();
 		if (createdAt == null) {
-			createdAt = Instant.now();
+			createdAt = now;
 		}
+		updatedAt = now;
+	}
+
+	@PreUpdate
+	void onUpdate() {
+		updatedAt = Instant.now();
 	}
 
 	public UUID getId() {
@@ -68,8 +96,24 @@ public class User {
 		return email;
 	}
 
+	public String getTimezone() {
+		return timezone;
+	}
+
+	public String getLocale() {
+		return locale;
+	}
+
+	public String getAvatarUrl() {
+		return avatarUrl;
+	}
+
 	public Instant getCreatedAt() {
 		return createdAt;
+	}
+
+	public Instant getUpdatedAt() {
+		return updatedAt;
 	}
 
 	// Equality on the natural key (keycloakSubject), not the generated id —

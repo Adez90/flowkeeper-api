@@ -68,6 +68,9 @@ role, the configurable event-type taxonomy (seeded with a baseline set), and eve
 - [x] OpenAPI spec + Swagger UI (`springdoc-openapi`) — browsable at
       `/swagger-ui.html`, spec at `/v3/api-docs`; this is also what the
       web/mobile clients will later generate typed API clients from
+- [x] Basic profile: timezone, locale, avatar URL (`PATCH /api/v1/me`) —
+      statistics now use the user's own timezone instead of hardcoded UTC.
+      Avatar is a URL only; real file upload/storage is a separate decision
 - [ ] Organisation-wide statistics + an admin/manager view — needs the sharing
       and visibility model decided first (see the Blueprint's "Still open")
 

@@ -14,8 +14,11 @@ import se.flowkeeper.api.account.MemberRole;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
 
+import org.mockito.ArgumentCaptor;
+
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +26,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -84,6 +88,29 @@ class StatisticsServiceTest {
 		assertThat(response.openEvents()).isZero();
 		assertThat(response.averageIngoingEnergy()).isNull();
 		assertThat(response.byType()).isEmpty();
+	}
+
+	@Test
+	void usesTheUsersOwnTimezoneToComputeTheRangeNotUtc() {
+		User stockholmUser = new User("kc-subject-2", "Someone", "someone@example.com");
+		stockholmUser.updateProfile("Someone", "Europe/Stockholm", null, null);
+		UUID accountId = UUID.randomUUID();
+
+		when(currentUserResolver.require(jwt)).thenReturn(stockholmUser);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, stockholmUser, MemberRole.OWNER)));
+		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
+			.thenReturn(new OverallCounts(0L, 0L, null, null));
+		when(eventStatisticsRepository.aggregateByType(any(), any(), any())).thenReturn(List.of());
+
+		// Stockholm is UTC+2 in June (daylight saving) — chosen so this
+		// test actually fails if the code ever reverts to hardcoded UTC.
+		service().personalStatistics(jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 6, 15));
+
+		ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
+		verify(eventStatisticsRepository).aggregateOverall(any(), startCaptor.capture(), any());
+		Instant expectedStart = LocalDate.of(2026, 6, 15).atStartOfDay(ZoneId.of("Europe/Stockholm")).toInstant();
+		assertThat(startCaptor.getValue()).isEqualTo(expectedStart);
 	}
 
 	@Test
