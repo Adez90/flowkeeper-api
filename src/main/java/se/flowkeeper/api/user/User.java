@@ -72,4 +72,24 @@ public class User {
 		return createdAt;
 	}
 
+	// Equality on the natural key (keycloakSubject), not the generated id —
+	// the id is null until Hibernate assigns it on persist, which would
+	// otherwise make any not-yet-persisted or detached instance compare
+	// unequal to everything, itself included.
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) {
+			return true;
+		}
+		if (!(o instanceof User other)) {
+			return false;
+		}
+		return keycloakSubject != null && keycloakSubject.equals(other.keycloakSubject);
+	}
+
+	@Override
+	public int hashCode() {
+		return getClass().hashCode();
+	}
+
 }

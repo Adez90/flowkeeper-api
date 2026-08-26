@@ -51,7 +51,13 @@ role, the configurable event-type taxonomy (seeded with a baseline set), and eve
       membership (`POST /api/v1/registration`), unit + integration tested
 - [x] `/me`: resolves the signed-in user's profile and every account they belong
       to, for use on every app open after login (`GET /api/v1/me`)
-- [ ] Real domain endpoints for Events (log one, close it out, day/week/month rollups)
+- [x] Events: log one (`POST /api/v1/events`), close it out
+      (`POST /api/v1/events/{id}/complete`), list for the landing page
+      (`GET /api/v1/events?accountId=&status=`), and the type picker
+      (`GET /api/v1/event-types?accountId=`) — everything the "landing page"
+      (ongoing events + create) needs
+- [ ] Day/week/month statistics rollups (the separate stats view a client
+      navigates to from the landing page)
 - [ ] Organisation/Department/Group management endpoints
 - [ ] Generated OpenAPI spec for the web/mobile clients
 
