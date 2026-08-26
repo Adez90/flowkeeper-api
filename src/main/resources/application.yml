@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: flowkeeper-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/flowkeeper}
+    username: ${DB_USERNAME:flowkeeper}
+    password: ${DB_PASSWORD:change-me}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema is owned by Flyway migrations, never by Hibernate — this only
+      # verifies the mapped entities match what the migrations produced.
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OAUTH2_ISSUER_URI:http://localhost:8081/realms/flowkeeper}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

@@ -1,0 +1,12 @@
+target/
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+.DS_Store
+
+# Wrapper distribution jar (script-only distribution, nothing to ignore
+# beyond what's already excluded) — kept explicit for clarity.
+.mvn/wrapper/maven-wrapper.jar
