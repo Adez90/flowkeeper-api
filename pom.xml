@@ -50,6 +50,13 @@
 			<version>3.0.0</version>
 		</dependency>
 
+		<!-- Boot 4 split Flyway's autoconfiguration (the piece that actually calls
+		     migrate() and orders it before JPA) out of spring-boot-autoconfigure
+		     into this separate module — flyway-core alone doesn't trigger it. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-flyway</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-core</artifactId>
