@@ -13,6 +13,8 @@ public interface AccountMemberRepository extends JpaRepository<AccountMember, UU
 
 	Optional<AccountMember> findByAccount_IdAndUser(UUID accountId, User user);
 
+	Optional<AccountMember> findByAccount_IdAndUser_Id(UUID accountId, UUID userId);
+
 	List<AccountMember> findByAccount_Id(UUID accountId);
 
 	boolean existsByAccount_IdAndUser(UUID accountId, User user);
