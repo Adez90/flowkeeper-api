@@ -9,4 +9,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
 	Optional<User> findByKeycloakSubject(String keycloakSubject);
 
+	/** Matches the unique index on lower(email) — case-insensitive by design. */
+	Optional<User> findByEmailIgnoreCase(String email);
+
 }

@@ -12,15 +12,16 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import se.flowkeeper.api.organisation.Department;
+import se.flowkeeper.api.organisation.Group;
 import se.flowkeeper.api.user.User;
 
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Which account a user belongs to, and their role within it. department_id
- * and group_id are kept as raw ids rather than relations for now — mapped
- * to real Department/Group entities once those domain modules exist.
+ * Which account a user belongs to, their role within it, and — for
+ * Organisation accounts — which Department/Group scopes that to.
  */
 @Entity
 @Table(name = "account_members")
@@ -38,11 +39,13 @@ public class AccountMember {
 	@JoinColumn(name = "user_id", nullable = false)
 	private User user;
 
-	@Column(name = "department_id")
-	private UUID departmentId;
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "department_id")
+	private Department department;
 
-	@Column(name = "group_id")
-	private UUID groupId;
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "group_id")
+	private Group group;
 
 	@Enumerated(EnumType.STRING)
 	@Column(name = "role", nullable = false, length = 20)
@@ -54,10 +57,19 @@ public class AccountMember {
 	protected AccountMember() {
 	}
 
+	/** A Personal account's own OWNER membership, or an Organisation-level
+	 *  membership with no Department/Group scope (e.g. an ADMIN who manages
+	 *  the whole org rather than one group). */
 	public AccountMember(Account account, User user, MemberRole role) {
+		this(account, user, role, null, null);
+	}
+
+	public AccountMember(Account account, User user, MemberRole role, Department department, Group group) {
 		this.account = account;
 		this.user = user;
 		this.role = role;
+		this.department = department;
+		this.group = group;
 	}
 
 	@PrePersist
@@ -77,6 +89,14 @@ public class AccountMember {
 
 	public User getUser() {
 		return user;
+	}
+
+	public Department getDepartment() {
+		return department;
+	}
+
+	public Group getGroup() {
+		return group;
 	}
 
 	public MemberRole getRole() {
