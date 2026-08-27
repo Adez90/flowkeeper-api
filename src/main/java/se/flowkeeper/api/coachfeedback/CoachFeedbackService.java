@@ -16,6 +16,7 @@ import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.event.Event;
 import se.flowkeeper.api.event.EventRepository;
+import se.flowkeeper.api.event.EventResponse;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
 
@@ -97,6 +98,28 @@ public class CoachFeedbackService {
 
 		return coachFeedbackRepository.findByAccount_IdAndMember_IdOrderByCreatedAtDesc(accountId, memberId).stream()
 			.map(CoachFeedbackResponse::from)
+			.toList();
+	}
+
+	/**
+	 * That member's own events in this account, newest first — what a
+	 * "attach this feedback to an event" picker offers to choose from. Same
+	 * visibility as feedback itself: the member, or whoever supervises them.
+	 */
+	@Transactional(readOnly = true)
+	public List<EventResponse> listMemberEvents(Jwt jwt, UUID accountId, UUID memberId) {
+		User viewer = currentUserResolver.require(jwt);
+		requireOrganisation(accountId);
+		AccountMember viewerMembership = requireMembership(accountId, viewer.getId());
+		AccountMember memberMembership = requireMembership(accountId, memberId);
+
+		boolean isSelf = viewer.getId().equals(memberId);
+		if (!isSelf && !supervises(viewerMembership, memberMembership)) {
+			throw new AccessDeniedException("User %s cannot view member %s's events".formatted(viewer.getId(), memberId));
+		}
+
+		return eventRepository.findByAccount_IdAndUser_IdOrderByStartedAtDesc(accountId, memberId).stream()
+			.map(EventResponse::from)
 			.toList();
 	}
 

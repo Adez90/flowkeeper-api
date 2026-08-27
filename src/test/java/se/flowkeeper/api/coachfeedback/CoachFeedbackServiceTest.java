@@ -19,6 +19,7 @@ import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.event.Event;
 import se.flowkeeper.api.event.EventRepository;
+import se.flowkeeper.api.event.EventResponse;
 import se.flowkeeper.api.event.EventType;
 import se.flowkeeper.api.organisation.Department;
 import se.flowkeeper.api.organisation.Group;
@@ -235,6 +236,43 @@ class CoachFeedbackServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser_Id(accountId, other.getId())).thenReturn(Optional.of(otherMembership));
 
 		assertThatThrownBy(() -> service().list(jwt, accountId, other.getId()))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void supervisorCanListAMembersEventsForThePicker() {
+		stubOrganisation();
+		User coach = userWithId("kc-coach", "Coach", "coach@example.com");
+		User member = userWithId("kc-member", "Member", "member@example.com");
+		Group group = new Group(account, null, "Backend");
+		ReflectionTestUtils.setField(group, "id", UUID.randomUUID());
+		AccountMember coachMembership = new AccountMember(account, coach, MemberRole.COACH, null, group);
+		AccountMember memberMembership = new AccountMember(account, member, MemberRole.MEMBER, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(coach);
+		when(accountMemberRepository.findByAccount_IdAndUser_Id(accountId, coach.getId())).thenReturn(Optional.of(coachMembership));
+		when(accountMemberRepository.findByAccount_IdAndUser_Id(accountId, member.getId())).thenReturn(Optional.of(memberMembership));
+		Event event = new Event(member, account, Mockito.mock(EventType.class), (short) 3, null);
+		when(eventRepository.findByAccount_IdAndUser_IdOrderByStartedAtDesc(accountId, member.getId())).thenReturn(List.of(event));
+
+		List<EventResponse> response = service().listMemberEvents(jwt, accountId, member.getId());
+
+		assertThat(response).hasSize(1);
+	}
+
+	@Test
+	void anUnrelatedMemberCannotListSomeoneElsesEvents() {
+		stubOrganisation();
+		User member = userWithId("kc-member", "Member", "member@example.com");
+		User other = userWithId("kc-other", "Other", "other@example.com");
+		AccountMember memberMembership = new AccountMember(account, member, MemberRole.MEMBER);
+		AccountMember otherMembership = new AccountMember(account, other, MemberRole.MEMBER);
+
+		when(currentUserResolver.require(jwt)).thenReturn(member);
+		when(accountMemberRepository.findByAccount_IdAndUser_Id(accountId, member.getId())).thenReturn(Optional.of(memberMembership));
+		when(accountMemberRepository.findByAccount_IdAndUser_Id(accountId, other.getId())).thenReturn(Optional.of(otherMembership));
+
+		assertThatThrownBy(() -> service().listMemberEvents(jwt, accountId, other.getId()))
 			.isInstanceOf(AccessDeniedException.class);
 	}
 

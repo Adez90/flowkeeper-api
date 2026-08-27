@@ -12,6 +12,9 @@ public interface EventRepository extends JpaRepository<Event, UUID> {
 
 	List<Event> findByAccount_IdOrderByStartedAtDesc(UUID accountId);
 
+	/** One specific member's own events in one account — used by the coach-feedback event picker, not the general account-wide listing above. */
+	List<Event> findByAccount_IdAndUser_IdOrderByStartedAtDesc(UUID accountId, UUID userId);
+
 	/** Does this user have an event they haven't completed yet — the unfinished-event reminder's trigger condition. */
 	boolean existsByUser_IdAndStatus(UUID userId, EventStatus status);
 

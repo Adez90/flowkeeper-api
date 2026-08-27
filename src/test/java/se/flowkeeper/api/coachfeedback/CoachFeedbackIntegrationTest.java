@@ -47,6 +47,12 @@ class CoachFeedbackIntegrationTest extends AbstractIntegrationTest {
 		UUID eventTypeId = firstEventTypeId(asMember, accountId);
 		UUID eventId = logEvent(asMember, accountId, eventTypeId);
 
+		// The coach can see the member's own events to pick one to attach feedback to.
+		mockMvc.perform(get("/api/v1/organisations/" + accountId + "/members/" + memberId + "/events").with(jwt().jwt(asCoach)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(1))
+			.andExpect(jsonPath("$[0].id").value(eventId.toString()));
+
 		mockMvc.perform(post("/api/v1/organisations/" + accountId + "/members/" + memberId + "/feedback")
 				.with(jwt().jwt(asCoach))
 				.contentType(MediaType.APPLICATION_JSON)

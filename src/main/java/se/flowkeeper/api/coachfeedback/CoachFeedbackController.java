@@ -11,12 +11,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import se.flowkeeper.api.event.EventResponse;
 
 import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/organisations/{accountId}/members/{memberId}/feedback")
+@RequestMapping("/api/v1/organisations/{accountId}/members/{memberId}")
 public class CoachFeedbackController {
 
 	private final CoachFeedbackService coachFeedbackService;
@@ -26,7 +27,7 @@ public class CoachFeedbackController {
 	}
 
 	/** Only whoever supervises this member (their group's COACH, department's ADMIN, or the OWNER) can leave feedback for them. */
-	@PostMapping
+	@PostMapping("/feedback")
 	public ResponseEntity<CoachFeedbackResponse> create(
 			@AuthenticationPrincipal Jwt jwt,
 			@PathVariable UUID accountId,
@@ -36,10 +37,17 @@ public class CoachFeedbackController {
 	}
 
 	/** Newest first. Visible to the member themselves, and to whoever supervises them. */
-	@GetMapping
+	@GetMapping("/feedback")
 	public List<CoachFeedbackResponse> list(
 			@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId, @PathVariable UUID memberId) {
 		return coachFeedbackService.list(jwt, accountId, memberId);
+	}
+
+	/** That member's own events, newest first — what an "attach to an event" picker offers. Same visibility as feedback itself. */
+	@GetMapping("/events")
+	public List<EventResponse> events(
+			@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId, @PathVariable UUID memberId) {
+		return coachFeedbackService.listMemberEvents(jwt, accountId, memberId);
 	}
 
 }
