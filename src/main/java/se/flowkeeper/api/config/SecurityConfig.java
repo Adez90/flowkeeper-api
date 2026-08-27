@@ -35,6 +35,9 @@ public class SecurityConfig {
 				// The docs page itself is public; every endpoint it lets you
 				// try still requires a real bearer token via "Authorize".
 				.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+				// Avatar images are rendered in plain <img> tags on both
+				// clients, which can't attach an Authorization header.
+				.requestMatchers("GET", "/api/v1/avatars/**").permitAll()
 				.anyRequest().authenticated()
 			)
 			.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));

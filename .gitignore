@@ -1,4 +1,7 @@
 target/
+# Default local avatar storage dir (app.avatars.storage-dir) — created on
+# startup, holds uploaded images when running outside the prod container.
+data/
 .idea/
 *.iml
 .vscode/

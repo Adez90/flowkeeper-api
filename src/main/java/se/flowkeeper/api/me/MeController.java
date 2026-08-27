@@ -6,8 +6,11 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 public class MeController {
@@ -44,6 +47,12 @@ public class MeController {
 	@PatchMapping("/api/v1/me/push-token")
 	public MeResponse updatePushToken(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody UpdatePushTokenRequest request) {
 		return meService.updatePushToken(jwt, request);
+	}
+
+	/** Stores the uploaded image and points avatarUrl at it — replaces any previous server-stored avatar. */
+	@PostMapping("/api/v1/me/avatar")
+	public MeResponse uploadAvatar(@AuthenticationPrincipal Jwt jwt, @RequestParam("file") MultipartFile file) {
+		return meService.uploadAvatar(jwt, file);
 	}
 
 }

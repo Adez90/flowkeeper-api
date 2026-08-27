@@ -1,6 +1,10 @@
 spring:
   application:
     name: flowkeeper-api
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/flowkeeper}
     username: ${DB_USERNAME:flowkeeper}
@@ -44,9 +48,18 @@ app:
     allowed-origin: ${APP_ORIGIN:http://localhost:5173}
   notifications:
     from-email: ${NOTIFICATIONS_FROM_EMAIL:noreply@flowkeeper.se}
+  avatars:
+    # A disk volume mounted into the API container in production
+    # (flowkeeper-infra); a plain relative directory locally, created on
+    # startup if missing.
+    storage-dir: ${AVATAR_STORAGE_DIR:./data/avatars}
 
 server:
   port: 8080
+  # Caddy terminates TLS and reverse-proxies to this container over plain
+  # HTTP, forwarding X-Forwarded-Proto/Host — without this, the avatar
+  # upload endpoint would build "http://" URLs behind an https:// domain.
+  forward-headers-strategy: framework
 
 management:
   endpoints:

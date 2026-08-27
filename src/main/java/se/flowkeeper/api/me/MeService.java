@@ -5,7 +5,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import se.flowkeeper.api.account.AccountMemberRepository;
+import se.flowkeeper.api.avatar.AvatarStorageService;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
@@ -15,6 +18,8 @@ import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The read counterpart to Registration: called on every app open after
@@ -27,16 +32,25 @@ public class MeService {
 
 	private static final Logger log = LoggerFactory.getLogger(MeService.class);
 
+	// Matches a URL this service itself produced in uploadAvatar, so a
+	// re-upload can clean up the file it's replacing — never matches a
+	// legacy pasted-URL avatar (an external host, or no /api/v1/avatars/
+	// path at all), which this service must never try to delete.
+	private static final Pattern MANAGED_AVATAR_URL = Pattern.compile(".*/api/v1/avatars/([0-9a-f-]{36}\\.(?:jpg|png|webp))$");
+
 	private final UserRepository userRepository;
 	private final AccountMemberRepository accountMemberRepository;
 	private final CurrentUserResolver currentUserResolver;
+	private final AvatarStorageService avatarStorageService;
 
 	public MeService(UserRepository userRepository,
 			AccountMemberRepository accountMemberRepository,
-			CurrentUserResolver currentUserResolver) {
+			CurrentUserResolver currentUserResolver,
+			AvatarStorageService avatarStorageService) {
 		this.userRepository = userRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.currentUserResolver = currentUserResolver;
+		this.avatarStorageService = avatarStorageService;
 	}
 
 	@Transactional(readOnly = true)
@@ -67,6 +81,26 @@ public class MeService {
 		user.updateNotificationPreferences(request.notifyInApp(), request.notifyPush(), request.notifyEmail());
 		log.info("User {} set notification preferences (inApp={}, push={}, email={})",
 			user.getId(), request.notifyInApp(), request.notifyPush(), request.notifyEmail());
+		return toResponse(user);
+	}
+
+	@Transactional
+	public MeResponse uploadAvatar(Jwt jwt, MultipartFile file) {
+		User user = currentUserResolver.require(jwt);
+
+		String previousAvatarUrl = user.getAvatarUrl();
+		String filename = avatarStorageService.store(file);
+		String avatarUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+			.path("/api/v1/avatars/" + filename)
+			.toUriString();
+		user.updateAvatarUrl(avatarUrl);
+
+		Matcher previous = MANAGED_AVATAR_URL.matcher(previousAvatarUrl == null ? "" : previousAvatarUrl);
+		if (previous.matches()) {
+			avatarStorageService.delete(previous.group(1));
+		}
+
+		log.info("User {} uploaded a new avatar", user.getId());
 		return toResponse(user);
 	}
 

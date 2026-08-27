@@ -1,16 +1,22 @@
 package se.flowkeeper.api.me;
 
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import se.flowkeeper.api.AbstractIntegrationTest;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +25,9 @@ class MeIntegrationTest extends AbstractIntegrationTest {
 
 	@Autowired
 	MockMvc mockMvc;
+
+	@Autowired
+	ObjectMapper objectMapper;
 
 	@Test
 	void unknownSubjectGetsNotFoundUntilRegistered() throws Exception {
@@ -159,6 +168,69 @@ class MeIntegrationTest extends AbstractIntegrationTest {
 					{"expoPushToken":"ExponentPushToken[abc123]"}
 					"""))
 			.andExpect(status().isOk());
+	}
+
+	@Test
+	void uploadedAvatarIsPersistedAndPubliclyDownloadable() throws Exception {
+		mockMvc.perform(post("/api/v1/registration")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-avatar-subject")
+					.claim("name", "Avatar Test")
+					.claim("email", "avatar-test@example.com"))))
+			.andExpect(status().isCreated());
+
+		MockMultipartFile file = new MockMultipartFile("file", "me.png", "image/png", new byte[] {1, 2, 3, 4});
+
+		MvcResult uploadResult = mockMvc.perform(multipart("/api/v1/me/avatar", file)
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-avatar-subject")
+					.claim("name", "Avatar Test")
+					.claim("email", "avatar-test@example.com"))))
+			.andExpect(status().isOk())
+			.andReturn();
+
+		String avatarUrl = objectMapper.readTree(uploadResult.getResponse().getContentAsString()).get("avatarUrl").asText();
+		assertThat(avatarUrl).contains("/api/v1/avatars/");
+		String avatarPath = avatarUrl.substring(avatarUrl.indexOf("/api/v1/avatars/"));
+
+		// No jwt() — this is the plain <img src> request a browser makes, no Authorization header available.
+		mockMvc.perform(get(avatarPath))
+			.andExpect(status().isOk())
+			.andExpect(content().contentType(MediaType.IMAGE_PNG))
+			.andExpect(content().bytes(new byte[] {1, 2, 3, 4}));
+
+		mockMvc.perform(get("/api/v1/me")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-avatar-subject")
+					.claim("name", "Avatar Test")
+					.claim("email", "avatar-test@example.com"))))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.avatarUrl").value(avatarUrl));
+	}
+
+	@Test
+	void avatarUploadRejectsAnUnsupportedFileType() throws Exception {
+		mockMvc.perform(post("/api/v1/registration")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-badavatar-subject")
+					.claim("name", "Bad Avatar")
+					.claim("email", "bad-avatar@example.com"))))
+			.andExpect(status().isCreated());
+
+		MockMultipartFile file = new MockMultipartFile("file", "me.gif", "image/gif", new byte[] {1});
+
+		mockMvc.perform(multipart("/api/v1/me/avatar", file)
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-badavatar-subject")
+					.claim("name", "Bad Avatar")
+					.claim("email", "bad-avatar@example.com"))))
+			.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void avatarLookupForAnUnknownFilenameIs404() throws Exception {
+		mockMvc.perform(get("/api/v1/avatars/11111111-1111-1111-1111-111111111111.jpg"))
+			.andExpect(status().isNotFound());
 	}
 
 }

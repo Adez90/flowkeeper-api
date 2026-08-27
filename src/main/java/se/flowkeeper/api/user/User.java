@@ -78,6 +78,10 @@ public class User {
 		this.avatarUrl = avatarUrl;
 	}
 
+	public void updateAvatarUrl(String avatarUrl) {
+		this.avatarUrl = avatarUrl;
+	}
+
 	public void updateNotificationPreferences(boolean notifyInApp, boolean notifyPush, boolean notifyEmail) {
 		this.notifyInApp = notifyInApp;
 		this.notifyPush = notifyPush;
