@@ -20,6 +20,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Every test method here uses its own uniquely-suffixed Keycloak subjects —
+ * AbstractIntegrationTest's Postgres container is shared across the whole
+ * suite run with no per-test rollback, so reusing a fixed subject across
+ * multiple @Test methods makes the second one's registration a genuine
+ * "already registered" 200 instead of a fresh 201 (confirmed live: this
+ * broke exactly that way on the first real CI run, once with a shared
+ * subject across two @Test methods in this class).
+ */
 @AutoConfigureMockMvc
 class OrganisationIntegrationTest extends AbstractIntegrationTest {
 
@@ -29,13 +38,11 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 	@Autowired
 	ObjectMapper objectMapper;
 
-	private final Consumer<Jwt.Builder> asOwner = b -> b
-		.subject("kc-org-owner").claim("name", "Org Owner").claim("email", "org-owner@example.com");
-	private final Consumer<Jwt.Builder> asMember = b -> b
-		.subject("kc-org-member").claim("name", "Org Member").claim("email", "org-member@example.com");
-
 	@Test
 	void ownerBuildsStructureAndAddsAnAlreadyRegisteredMember() throws Exception {
+		Consumer<Jwt.Builder> asOwner = userJwt("kc-org-owner-1", "Org Owner", "org-owner-1@example.com");
+		Consumer<Jwt.Builder> asMember = userJwt("kc-org-member-1", "Org Member", "org-member-1@example.com");
+
 		// Both users have to exist as FlowKeeper profiles first — org
 		// membership is added to an existing profile, not used to create one.
 		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOwner))).andExpect(status().isCreated());
@@ -77,7 +84,7 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 				.with(jwt().jwt(asOwner))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-					{"email":"org-member@example.com","role":"MEMBER","departmentId":"%s","groupId":"%s"}
+					{"email":"org-member-1@example.com","role":"MEMBER","departmentId":"%s","groupId":"%s"}
 					""".formatted(departmentId, groupId)))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.role").value("MEMBER"))
@@ -99,6 +106,9 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 
 	@Test
 	void aPlainMemberCannotCreateADepartment() throws Exception {
+		Consumer<Jwt.Builder> asOwner = userJwt("kc-org-owner-2", "Org Owner", "org-owner-2@example.com");
+		Consumer<Jwt.Builder> asMember = userJwt("kc-org-member-2", "Org Member", "org-member-2@example.com");
+
 		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOwner))).andExpect(status().isCreated());
 		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asMember))).andExpect(status().isCreated());
 
@@ -108,6 +118,7 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 				.content("""
 					{"name":"Acme AB"}
 					"""))
+			.andExpect(status().isCreated())
 			.andReturn();
 		UUID accountId = UUID.fromString(readJson(orgResult).get("accountId").asText());
 
@@ -115,7 +126,7 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 				.with(jwt().jwt(asOwner))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-					{"email":"org-member@example.com","role":"MEMBER"}
+					{"email":"org-member-2@example.com","role":"MEMBER"}
 					"""))
 			.andExpect(status().isCreated());
 
@@ -130,6 +141,8 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 
 	@Test
 	void addingSomeoneWhosNeverLoggedInFails() throws Exception {
+		Consumer<Jwt.Builder> asOwner = userJwt("kc-org-owner-3", "Org Owner", "org-owner-3@example.com");
+
 		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOwner))).andExpect(status().isCreated());
 
 		MvcResult orgResult = mockMvc.perform(post("/api/v1/organisations")
@@ -138,6 +151,7 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 				.content("""
 					{"name":"Acme AB"}
 					"""))
+			.andExpect(status().isCreated())
 			.andReturn();
 		UUID accountId = UUID.fromString(readJson(orgResult).get("accountId").asText());
 
@@ -148,6 +162,10 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 					{"email":"never-logged-in@example.com","role":"MEMBER"}
 					"""))
 			.andExpect(status().isNotFound());
+	}
+
+	private Consumer<Jwt.Builder> userJwt(String subject, String name, String email) {
+		return b -> b.subject(subject).claim("name", name).claim("email", email);
 	}
 
 	private JsonNode readJson(MvcResult result) throws Exception {
