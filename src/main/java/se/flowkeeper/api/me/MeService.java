@@ -61,6 +61,23 @@ public class MeService {
 		return toResponse(user);
 	}
 
+	@Transactional
+	public MeResponse updateNotificationPreferences(Jwt jwt, UpdateNotificationPreferencesRequest request) {
+		User user = currentUserResolver.require(jwt);
+		user.updateNotificationPreferences(request.notifyInApp(), request.notifyPush(), request.notifyEmail());
+		log.info("User {} set notification preferences (inApp={}, push={}, email={})",
+			user.getId(), request.notifyInApp(), request.notifyPush(), request.notifyEmail());
+		return toResponse(user);
+	}
+
+	@Transactional
+	public MeResponse updatePushToken(Jwt jwt, UpdatePushTokenRequest request) {
+		User user = currentUserResolver.require(jwt);
+		user.updateExpoPushToken(request.expoPushToken());
+		log.info("User {} registered a push token", user.getId());
+		return toResponse(user);
+	}
+
 	private MeResponse toResponse(User user) {
 		List<MeResponse.AccountSummary> accounts = accountMemberRepository.findByUser(user).stream()
 			.map(member -> new MeResponse.AccountSummary(
@@ -74,6 +91,7 @@ public class MeService {
 		return new MeResponse(
 			user.getId(), user.getDisplayName(), user.getEmail(),
 			user.getTimezone(), user.getLocale(), user.getAvatarUrl(),
+			user.isNotifyInApp(), user.isNotifyPush(), user.isNotifyEmail(),
 			accounts);
 	}
 

@@ -107,4 +107,58 @@ class MeIntegrationTest extends AbstractIntegrationTest {
 			.andExpect(status().isBadRequest());
 	}
 
+	@Test
+	void notificationPreferencesPersistAndAreReflectedOnNextGet() throws Exception {
+		mockMvc.perform(post("/api/v1/registration")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-notifyprefs-subject")
+					.claim("name", "Notify Prefs")
+					.claim("email", "notify-prefs@example.com"))))
+			.andExpect(status().isCreated());
+
+		mockMvc.perform(patch("/api/v1/me/notification-preferences")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-notifyprefs-subject")
+					.claim("name", "Notify Prefs")
+					.claim("email", "notify-prefs@example.com")))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"notifyInApp":true,"notifyPush":true,"notifyEmail":false}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.notifyInApp").value(true))
+			.andExpect(jsonPath("$.notifyPush").value(true))
+			.andExpect(jsonPath("$.notifyEmail").value(false));
+
+		mockMvc.perform(get("/api/v1/me")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-notifyprefs-subject")
+					.claim("name", "Notify Prefs")
+					.claim("email", "notify-prefs@example.com"))))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.notifyInApp").value(true))
+			.andExpect(jsonPath("$.notifyPush").value(true));
+	}
+
+	@Test
+	void pushTokenCanBeRegistered() throws Exception {
+		mockMvc.perform(post("/api/v1/registration")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-pushtoken-subject")
+					.claim("name", "Push Token")
+					.claim("email", "push-token@example.com"))))
+			.andExpect(status().isCreated());
+
+		mockMvc.perform(patch("/api/v1/me/push-token")
+				.with(jwt().jwt(jwtBuilder -> jwtBuilder
+					.subject("kc-pushtoken-subject")
+					.claim("name", "Push Token")
+					.claim("email", "push-token@example.com")))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"expoPushToken":"ExponentPushToken[abc123]"}
+					"""))
+			.andExpect(status().isOk());
+	}
+
 }

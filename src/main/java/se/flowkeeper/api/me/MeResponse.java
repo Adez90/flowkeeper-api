@@ -10,6 +10,9 @@ public record MeResponse(
 	String timezone,
 	String locale,
 	String avatarUrl,
+	boolean notifyInApp,
+	boolean notifyPush,
+	boolean notifyEmail,
 	List<AccountSummary> accounts
 ) {
 

@@ -93,6 +93,45 @@ class MeServiceTest {
 			.isInstanceOf(ValidationException.class);
 	}
 
+	@Test
+	void notificationPreferencesDefaultToAllOptedOut() {
+		Jwt jwt = jwtFor("kc-subject-1");
+		User user = new User("kc-subject-1", "Anders Johansson", "anders@example.com");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+
+		MeResponse response = service().updateProfile(jwt,
+			new UpdateProfileRequest("Anders Johansson", "UTC", null, null));
+
+		assertThat(response.notifyInApp()).isFalse();
+		assertThat(response.notifyPush()).isFalse();
+		assertThat(response.notifyEmail()).isFalse();
+	}
+
+	@Test
+	void updateNotificationPreferencesAppliesEveryChannel() {
+		Jwt jwt = jwtFor("kc-subject-1");
+		User user = new User("kc-subject-1", "Anders Johansson", "anders@example.com");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+
+		MeResponse response = service().updateNotificationPreferences(jwt,
+			new UpdateNotificationPreferencesRequest(true, true, false));
+
+		assertThat(response.notifyInApp()).isTrue();
+		assertThat(response.notifyPush()).isTrue();
+		assertThat(response.notifyEmail()).isFalse();
+	}
+
+	@Test
+	void updatePushTokenPersistsTheToken() {
+		Jwt jwt = jwtFor("kc-subject-1");
+		User user = new User("kc-subject-1", "Anders Johansson", "anders@example.com");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+
+		service().updatePushToken(jwt, new UpdatePushTokenRequest("ExponentPushToken[abc123]"));
+
+		assertThat(user.getExpoPushToken()).isEqualTo("ExponentPushToken[abc123]");
+	}
+
 	private Jwt jwtFor(String subject) {
 		Instant now = Instant.now();
 		return Jwt.withTokenValue("test-token")

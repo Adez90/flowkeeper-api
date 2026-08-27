@@ -20,6 +20,21 @@ spring:
           # 8082, not 8081 — that's Expo's Metro dev server default port,
           # which flowkeeper-mobile will also be running locally.
           issuer-uri: ${OAUTH2_ISSUER_URI:http://localhost:8082/realms/flowkeeper}
+  mail:
+    # No real relay configured by default — an email notification attempt
+    # just fails and is logged (see EmailNotificationSender) until a real
+    # SMTP relay (SendGrid, SES, Mailgun, ...) is set via these env vars in
+    # flowkeeper-infra's environment.
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:false}
+          starttls:
+            enable: ${SMTP_STARTTLS:false}
 
 app:
   cors:
@@ -27,6 +42,8 @@ app:
     # deployment, so the browser enforces CORS. Vite's default dev port
     # locally.
     allowed-origin: ${APP_ORIGIN:http://localhost:5173}
+  notifications:
+    from-email: ${NOTIFICATIONS_FROM_EMAIL:noreply@flowkeeper.se}
 
 server:
   port: 8080

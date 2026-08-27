@@ -16,12 +16,11 @@ import se.flowkeeper.api.organisation.Group;
 import se.flowkeeper.api.organisation.GroupRepository;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
+import se.flowkeeper.api.user.UserTimezones;
 
-import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -50,17 +49,20 @@ public class StatisticsService {
 	private final DepartmentRepository departmentRepository;
 	private final GroupRepository groupRepository;
 	private final CurrentUserResolver currentUserResolver;
+	private final UserTimezones userTimezones;
 
 	public StatisticsService(EventStatisticsRepository eventStatisticsRepository,
 			AccountMemberRepository accountMemberRepository,
 			DepartmentRepository departmentRepository,
 			GroupRepository groupRepository,
-			CurrentUserResolver currentUserResolver) {
+			CurrentUserResolver currentUserResolver,
+			UserTimezones userTimezones) {
 		this.eventStatisticsRepository = eventStatisticsRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.departmentRepository = departmentRepository;
 		this.groupRepository = groupRepository;
 		this.currentUserResolver = currentUserResolver;
+		this.userTimezones = userTimezones;
 	}
 
 	@Transactional(readOnly = true)
@@ -68,7 +70,7 @@ public class StatisticsService {
 		User user = currentUserResolver.require(jwt);
 		requireMembership(accountId, user);
 
-		ZoneId zone = resolveZone(user);
+		ZoneId zone = userTimezones.resolve(user);
 		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(zone);
 		LocalDate rangeStart = period.startOf(date);
 		LocalDate rangeEnd = period.endOf(date);
@@ -212,7 +214,7 @@ public class StatisticsService {
 			.map(member -> member.getUser().getId())
 			.toList();
 
-		ZoneId zone = resolveZone(viewer);
+		ZoneId zone = userTimezones.resolve(viewer);
 		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(zone);
 		LocalDate rangeStart = period.startOf(date);
 		LocalDate rangeEnd = period.endOf(date);
@@ -264,7 +266,7 @@ public class StatisticsService {
 
 	private AggregateStatisticsResponse buildAggregateResponse(
 			User viewer, UUID accountId, List<UUID> memberUserIds, StatisticsPeriod period, LocalDate referenceDate) {
-		ZoneId zone = resolveZone(viewer);
+		ZoneId zone = userTimezones.resolve(viewer);
 		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(zone);
 		LocalDate rangeStart = period.startOf(date);
 		LocalDate rangeEnd = period.endOf(date);
@@ -324,17 +326,6 @@ public class StatisticsService {
 		}
 		return member.getGroup() != null && member.getGroup().getDepartment() != null
 			&& departmentId.equals(member.getGroup().getDepartment().getId());
-	}
-
-	private ZoneId resolveZone(User user) {
-		try {
-			return ZoneId.of(user.getTimezone());
-		} catch (DateTimeException e) {
-			// Shouldn't happen — timezone is validated on write — but a
-			// "day" still has to mean something if it somehow does.
-			log.warn("User {} has an invalid stored timezone '{}', falling back to UTC", user.getId(), user.getTimezone());
-			return ZoneOffset.UTC;
-		}
 	}
 
 }

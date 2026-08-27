@@ -43,6 +43,18 @@ public class User {
 	@Column(name = "avatar_url", length = 500)
 	private String avatarUrl;
 
+	@Column(name = "notify_in_app", nullable = false)
+	private boolean notifyInApp;
+
+	@Column(name = "notify_push", nullable = false)
+	private boolean notifyPush;
+
+	@Column(name = "notify_email", nullable = false)
+	private boolean notifyEmail;
+
+	@Column(name = "expo_push_token", length = 200)
+	private String expoPushToken;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
@@ -64,6 +76,21 @@ public class User {
 		this.timezone = timezone;
 		this.locale = locale;
 		this.avatarUrl = avatarUrl;
+	}
+
+	public void updateNotificationPreferences(boolean notifyInApp, boolean notifyPush, boolean notifyEmail) {
+		this.notifyInApp = notifyInApp;
+		this.notifyPush = notifyPush;
+		this.notifyEmail = notifyEmail;
+	}
+
+	public void updateExpoPushToken(String expoPushToken) {
+		this.expoPushToken = expoPushToken;
+	}
+
+	/** Whether any reminder-nudge channel is switched on at all — the cheap check the reminder jobs filter candidates with before doing per-user timezone work. */
+	public boolean hasAnyNotificationChannelEnabled() {
+		return notifyInApp || notifyPush || notifyEmail;
 	}
 
 	@PrePersist
@@ -106,6 +133,22 @@ public class User {
 
 	public String getAvatarUrl() {
 		return avatarUrl;
+	}
+
+	public boolean isNotifyInApp() {
+		return notifyInApp;
+	}
+
+	public boolean isNotifyPush() {
+		return notifyPush;
+	}
+
+	public boolean isNotifyEmail() {
+		return notifyEmail;
+	}
+
+	public String getExpoPushToken() {
+		return expoPushToken;
 	}
 
 	public Instant getCreatedAt() {

@@ -34,4 +34,16 @@ public class MeController {
 		return meService.updateProfile(jwt, request);
 	}
 
+	@PatchMapping("/api/v1/me/notification-preferences")
+	public MeResponse updateNotificationPreferences(
+			@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody UpdateNotificationPreferencesRequest request) {
+		return meService.updateNotificationPreferences(jwt, request);
+	}
+
+	/** Registers/replaces the device Expo push notifications should target — no-op for notify_push until this has been called at least once. */
+	@PatchMapping("/api/v1/me/push-token")
+	public MeResponse updatePushToken(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody UpdatePushTokenRequest request) {
+		return meService.updatePushToken(jwt, request);
+	}
+
 }

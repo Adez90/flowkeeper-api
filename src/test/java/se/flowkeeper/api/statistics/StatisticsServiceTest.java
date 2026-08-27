@@ -17,6 +17,7 @@ import se.flowkeeper.api.organisation.Group;
 import se.flowkeeper.api.organisation.GroupRepository;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
+import se.flowkeeper.api.user.UserTimezones;
 
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -50,7 +51,8 @@ class StatisticsServiceTest {
 
 	private StatisticsService service() {
 		return new StatisticsService(
-			eventStatisticsRepository, accountMemberRepository, departmentRepository, groupRepository, currentUserResolver);
+			eventStatisticsRepository, accountMemberRepository, departmentRepository, groupRepository, currentUserResolver,
+			new UserTimezones());
 	}
 
 	@Test
