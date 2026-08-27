@@ -32,4 +32,36 @@ public class StatisticsController {
 		return statisticsService.personalStatistics(jwt, accountId, period, date);
 	}
 
+	/** A group's rolled-up Flow % — never one individual's number. See AggregateStatisticsResponse. */
+	@GetMapping("/api/v1/statistics/group")
+	public AggregateStatisticsResponse group(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam UUID groupId,
+			@RequestParam StatisticsPeriod period,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+		return statisticsService.groupStatistics(jwt, accountId, groupId, period, date);
+	}
+
+	/** A department's rolled-up Flow % (every member under it, directly or via one of its groups). */
+	@GetMapping("/api/v1/statistics/department")
+	public AggregateStatisticsResponse department(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam UUID departmentId,
+			@RequestParam StatisticsPeriod period,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+		return statisticsService.departmentStatistics(jwt, accountId, departmentId, period, date);
+	}
+
+	/** The whole organisation's rolled-up Flow % — the OWNER's view only. */
+	@GetMapping("/api/v1/statistics/organisation")
+	public AggregateStatisticsResponse organisation(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam StatisticsPeriod period,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+		return statisticsService.organisationStatistics(jwt, accountId, period, date);
+	}
+
 }

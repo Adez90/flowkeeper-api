@@ -11,10 +11,15 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.AccountType;
 import se.flowkeeper.api.account.MemberRole;
+import se.flowkeeper.api.organisation.Department;
+import se.flowkeeper.api.organisation.DepartmentRepository;
+import se.flowkeeper.api.organisation.Group;
+import se.flowkeeper.api.organisation.GroupRepository;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
 
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -34,6 +39,8 @@ class StatisticsServiceTest {
 
 	@Mock EventStatisticsRepository eventStatisticsRepository;
 	@Mock AccountMemberRepository accountMemberRepository;
+	@Mock DepartmentRepository departmentRepository;
+	@Mock GroupRepository groupRepository;
 	@Mock CurrentUserResolver currentUserResolver;
 
 	private final User user = new User("kc-subject-1", "Anders Johansson", "anders@example.com");
@@ -42,7 +49,8 @@ class StatisticsServiceTest {
 		.subject("kc-subject-1").issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).build();
 
 	private StatisticsService service() {
-		return new StatisticsService(eventStatisticsRepository, accountMemberRepository, currentUserResolver);
+		return new StatisticsService(
+			eventStatisticsRepository, accountMemberRepository, departmentRepository, groupRepository, currentUserResolver);
 	}
 
 	@Test
@@ -114,6 +122,84 @@ class StatisticsServiceTest {
 		verify(eventStatisticsRepository).aggregateOverall(any(), startCaptor.capture(), any());
 		Instant expectedStart = LocalDate.of(2026, 6, 15).atStartOfDay(ZoneId.of("Europe/Stockholm")).toInstant();
 		assertThat(startCaptor.getValue()).isEqualTo(expectedStart);
+	}
+
+	@Test
+	void groupStatisticsBelowMinimumSizeWithholdNumbers() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember coachMembership = new AccountMember(account, user, MemberRole.COACH, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(coachMembership));
+		when(groupRepository.findByIdAndAccount_Id(groupId, accountId)).thenReturn(Optional.of(group));
+		// Only 2 members — below MIN_MEMBERS_FOR_AGGREGATE (4).
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(
+			new AccountMember(account, user, MemberRole.COACH, null, group),
+			new AccountMember(account, new User("kc-x", "X", "x@example.com"), MemberRole.MEMBER, null, group)));
+
+		AggregateStatisticsResponse response = service().groupStatistics(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.belowMinimumSize()).isTrue();
+		assertThat(response.memberCount()).isEqualTo(2);
+		assertThat(response.flowPercentage()).isNull();
+		assertThat(response.totalEvents()).isNull();
+	}
+
+	@Test
+	void groupStatisticsVisibleToOwnCoachAboveMinimumSize() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember coachMembership = new AccountMember(account, user, MemberRole.COACH, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(coachMembership));
+		when(groupRepository.findByIdAndAccount_Id(groupId, accountId)).thenReturn(Optional.of(group));
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(
+			new AccountMember(account, new User("kc-1", "A", "a@example.com"), MemberRole.MEMBER, null, group),
+			new AccountMember(account, new User("kc-2", "B", "b@example.com"), MemberRole.MEMBER, null, group),
+			new AccountMember(account, new User("kc-3", "C", "c@example.com"), MemberRole.MEMBER, null, group),
+			new AccountMember(account, new User("kc-4", "D", "d@example.com"), MemberRole.MEMBER, null, group)));
+		when(eventStatisticsRepository.aggregateOverallForUsers(any(), any(), any(), any()))
+			.thenReturn(new OverallCounts(10L, 8L, 6L, 3.0, 0.5));
+
+		AggregateStatisticsResponse response = service().groupStatistics(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.belowMinimumSize()).isFalse();
+		assertThat(response.memberCount()).isEqualTo(4);
+		assertThat(response.flowPercentage()).isEqualTo(75.0); // 6 of 8 completed in flow
+	}
+
+	@Test
+	void groupStatisticsDeniedToAnUnrelatedMember() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		AccountMember plainMembership = new AccountMember(account, user, MemberRole.MEMBER);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(plainMembership));
+		when(groupRepository.findByIdAndAccount_Id(groupId, accountId)).thenReturn(Optional.of(group));
+
+		assertThatThrownBy(() -> service().groupStatistics(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void organisationStatisticsOnlyVisibleToOwner() {
+		UUID accountId = UUID.randomUUID();
+		Department department = new Department(account, "Engineering");
+		AccountMember adminMembership = new AccountMember(account, user, MemberRole.ADMIN, department, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(adminMembership));
+
+		assertThatThrownBy(() -> service().organisationStatistics(jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12)))
+			.isInstanceOf(AccessDeniedException.class);
 	}
 
 	@Test
