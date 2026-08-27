@@ -10,6 +10,8 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.MemberRole;
 import se.flowkeeper.api.common.ResourceNotFoundException;
+import se.flowkeeper.api.common.ValidationException;
+import se.flowkeeper.api.event.EventStatus;
 import se.flowkeeper.api.organisation.Department;
 import se.flowkeeper.api.organisation.DepartmentRepository;
 import se.flowkeeper.api.organisation.Group;
@@ -21,9 +23,13 @@ import se.flowkeeper.api.user.UserTimezones;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class StatisticsService {
@@ -43,6 +49,11 @@ public class StatisticsService {
 	// flagged there as something to revisit once a larger real organisation
 	// actually exercises it.
 	private static final int MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS = 10;
+
+	// Bounds a trend response to something a chart (and a single in-memory
+	// bucketing pass) can reasonably handle — about six months of daily
+	// points, comfortably more than any real manager view needs.
+	private static final int MAX_TREND_DAYS = 186;
 
 	private final EventStatisticsRepository eventStatisticsRepository;
 	private final AccountMemberRepository accountMemberRepository;
@@ -97,6 +108,21 @@ public class StatisticsService {
 			byType);
 	}
 
+	/** Day-by-day Flow % trend for the caller's own personal statistics in an account, over an explicit date range. */
+	@Transactional(readOnly = true)
+	public PersonalTrendResponse personalTrend(Jwt jwt, UUID accountId, LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		User user = currentUserResolver.require(jwt);
+		requireMembership(accountId, user);
+		validateTrendRange(rangeStart, rangeEndExclusive);
+
+		ZoneId zone = userTimezones.resolve(user);
+		Instant start = rangeStart.atStartOfDay(zone).toInstant();
+		Instant end = rangeEndExclusive.atStartOfDay(zone).toInstant();
+		List<TrendRow> rows = eventStatisticsRepository.findTrendRows(accountId, start, end);
+
+		return new PersonalTrendResponse(rangeStart, rangeEndExclusive, bucketByDay(rows, rangeStart, rangeEndExclusive, zone));
+	}
+
 	/**
 	 * Visible to: that group's own manager (a COACH scoped to it, always —
 	 * their supervisory view), any ADMIN who supervises it (department-scoped
@@ -110,7 +136,21 @@ public class StatisticsService {
 			Jwt jwt, UUID accountId, UUID groupId, StatisticsPeriod period, LocalDate referenceDate) {
 		User viewer = currentUserResolver.require(jwt);
 		AccountMember viewerMembership = requireMembership(accountId, viewer);
+		List<UUID> memberUserIds = groupMemberIds(accountId, groupId, viewer, viewerMembership);
+		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
+	}
 
+	/** Same scope and authorization as {@link #groupStatistics}, but a day-by-day trend over an explicit date range. */
+	@Transactional(readOnly = true)
+	public AggregateTrendResponse groupTrend(
+			Jwt jwt, UUID accountId, UUID groupId, LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		User viewer = currentUserResolver.require(jwt);
+		AccountMember viewerMembership = requireMembership(accountId, viewer);
+		List<UUID> memberUserIds = groupMemberIds(accountId, groupId, viewer, viewerMembership);
+		return buildAggregateTrendResponse(viewer, accountId, memberUserIds, rangeStart, rangeEndExclusive);
+	}
+
+	private List<UUID> groupMemberIds(UUID accountId, UUID groupId, User viewer, AccountMember viewerMembership) {
 		Group group = groupRepository.findByIdAndAccount_Id(groupId, accountId)
 			.orElseThrow(() -> new ResourceNotFoundException("No such group: " + groupId));
 		UUID groupDepartmentId = group.getDepartment() != null ? group.getDepartment().getId() : null;
@@ -128,11 +168,9 @@ public class StatisticsService {
 		// No .distinct() needed: account_members has a unique(account_id,
 		// user_id) constraint, so a user can hold at most one membership row
 		// per account — never two rows in the same group to collapse.
-		List<UUID> memberUserIds = accountMemberRepository.findByGroup_Id(groupId).stream()
+		return accountMemberRepository.findByGroup_Id(groupId).stream()
 			.map(member -> member.getUser().getId())
 			.toList();
-
-		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
 	}
 
 	/**
@@ -146,7 +184,21 @@ public class StatisticsService {
 			Jwt jwt, UUID accountId, UUID departmentId, StatisticsPeriod period, LocalDate referenceDate) {
 		User viewer = currentUserResolver.require(jwt);
 		AccountMember viewerMembership = requireMembership(accountId, viewer);
+		List<UUID> memberUserIds = departmentMemberIds(accountId, departmentId, viewer, viewerMembership);
+		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
+	}
 
+	/** Same scope and authorization as {@link #departmentStatistics}, but a day-by-day trend over an explicit date range. */
+	@Transactional(readOnly = true)
+	public AggregateTrendResponse departmentTrend(
+			Jwt jwt, UUID accountId, UUID departmentId, LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		User viewer = currentUserResolver.require(jwt);
+		AccountMember viewerMembership = requireMembership(accountId, viewer);
+		List<UUID> memberUserIds = departmentMemberIds(accountId, departmentId, viewer, viewerMembership);
+		return buildAggregateTrendResponse(viewer, accountId, memberUserIds, rangeStart, rangeEndExclusive);
+	}
+
+	private List<UUID> departmentMemberIds(UUID accountId, UUID departmentId, User viewer, AccountMember viewerMembership) {
 		Department department = departmentRepository.findByIdAndAccount_Id(departmentId, accountId)
 			.orElseThrow(() -> new ResourceNotFoundException("No such department: " + departmentId));
 
@@ -166,12 +218,10 @@ public class StatisticsService {
 		// no dedup needed even across the two isUnderDepartment paths — a
 		// single row is either directly department-scoped or group-scoped,
 		// never matched twice.
-		List<UUID> memberUserIds = accountMemberRepository.findByAccount_Id(accountId).stream()
+		return accountMemberRepository.findByAccount_Id(accountId).stream()
 			.filter(member -> isUnderDepartment(member, departmentId))
 			.map(member -> member.getUser().getId())
 			.toList();
-
-		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
 	}
 
 	/** Only the organisation's OWNER — nothing sits above them in the ladder to peer-share with. */
@@ -179,17 +229,28 @@ public class StatisticsService {
 	public AggregateStatisticsResponse organisationStatistics(Jwt jwt, UUID accountId, StatisticsPeriod period, LocalDate referenceDate) {
 		User viewer = currentUserResolver.require(jwt);
 		AccountMember viewerMembership = requireMembership(accountId, viewer);
+		List<UUID> memberUserIds = organisationMemberIds(accountId, viewer, viewerMembership);
+		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
+	}
 
+	/** Same scope and authorization as {@link #organisationStatistics}, but a day-by-day trend over an explicit date range. */
+	@Transactional(readOnly = true)
+	public AggregateTrendResponse organisationTrend(Jwt jwt, UUID accountId, LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		User viewer = currentUserResolver.require(jwt);
+		AccountMember viewerMembership = requireMembership(accountId, viewer);
+		List<UUID> memberUserIds = organisationMemberIds(accountId, viewer, viewerMembership);
+		return buildAggregateTrendResponse(viewer, accountId, memberUserIds, rangeStart, rangeEndExclusive);
+	}
+
+	private List<UUID> organisationMemberIds(UUID accountId, User viewer, AccountMember viewerMembership) {
 		if (viewerMembership.getRole() != MemberRole.OWNER) {
 			throw new AccessDeniedException(
 				"User %s is not the OWNER of account %s".formatted(viewer.getId(), accountId));
 		}
 
-		List<UUID> memberUserIds = accountMemberRepository.findByAccount_Id(accountId).stream()
+		return accountMemberRepository.findByAccount_Id(accountId).stream()
 			.map(member -> member.getUser().getId())
 			.toList();
-
-		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
 	}
 
 	/**
@@ -289,6 +350,56 @@ public class StatisticsService {
 
 		return new AggregateStatisticsResponse(
 			period, rangeStart, rangeEnd, memberCount, false, total, completed, flowPercentage, overall.averageEnergyDelta());
+	}
+
+	private AggregateTrendResponse buildAggregateTrendResponse(
+			User viewer, UUID accountId, List<UUID> memberUserIds, LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		validateTrendRange(rangeStart, rangeEndExclusive);
+
+		int memberCount = memberUserIds.size();
+		if (memberCount < MIN_MEMBERS_FOR_AGGREGATE) {
+			log.debug("Trend for account {} has only {} member(s), below the minimum of {} — withholding",
+				accountId, memberCount, MIN_MEMBERS_FOR_AGGREGATE);
+			return new AggregateTrendResponse(rangeStart, rangeEndExclusive, memberCount, true, null);
+		}
+
+		ZoneId zone = userTimezones.resolve(viewer);
+		Instant start = rangeStart.atStartOfDay(zone).toInstant();
+		Instant end = rangeEndExclusive.atStartOfDay(zone).toInstant();
+		List<TrendRow> rows = eventStatisticsRepository.findTrendRowsForUsers(accountId, memberUserIds, start, end);
+
+		return new AggregateTrendResponse(
+			rangeStart, rangeEndExclusive, memberCount, false, bucketByDay(rows, rangeStart, rangeEndExclusive, zone));
+	}
+
+	private void validateTrendRange(LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		if (!rangeEndExclusive.isAfter(rangeStart)) {
+			throw new ValidationException("rangeEndExclusive must be after rangeStart");
+		}
+		long days = ChronoUnit.DAYS.between(rangeStart, rangeEndExclusive);
+		if (days > MAX_TREND_DAYS) {
+			throw new ValidationException("Trend range cannot exceed %d days (requested %d)".formatted(MAX_TREND_DAYS, days));
+		}
+	}
+
+	/** Buckets the given rows by local day (in `zone`) and computes each day's counts/Flow % — every day in range gets a point. */
+	private List<TrendPoint> bucketByDay(List<TrendRow> rows, LocalDate rangeStart, LocalDate rangeEndExclusive, ZoneId zone) {
+		Map<LocalDate, List<TrendRow>> byDate = rows.stream()
+			.collect(Collectors.groupingBy(row -> LocalDate.ofInstant(row.startedAt(), zone)));
+
+		List<TrendPoint> points = new ArrayList<>();
+		for (LocalDate date = rangeStart; date.isBefore(rangeEndExclusive); date = date.plusDays(1)) {
+			List<TrendRow> dayRows = byDate.getOrDefault(date, List.of());
+			long total = dayRows.size();
+			long completed = dayRows.stream().filter(row -> row.status() == EventStatus.COMPLETED).count();
+			long inFlow = dayRows.stream()
+				.filter(row -> row.status() == EventStatus.COMPLETED && row.outgoingEnergy() != null
+					&& (row.ingoingEnergy() + row.outgoingEnergy()) >= 4 && (row.ingoingEnergy() + row.outgoingEnergy()) <= 6)
+				.count();
+			double flowPercentage = completed != 0 ? (inFlow * 100.0 / completed) : 0.0;
+			points.add(new TrendPoint(date, total, completed, flowPercentage));
+		}
+		return points;
 	}
 
 	private AccountMember requireMembership(UUID accountId, User user) {

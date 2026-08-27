@@ -11,6 +11,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import se.flowkeeper.api.AbstractIntegrationTest;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -88,6 +90,46 @@ class StatisticsIntegrationTest extends AbstractIntegrationTest {
 		JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
 		assertThat(body.get("completedEvents").asLong()).isEqualTo(2);
 		assertThat(body.get("flowPercentage").asDouble()).isEqualTo(50.0);
+	}
+
+	@Test
+	void personalTrendPlacesTodaysEventInTodaysBucket() throws Exception {
+		setUpAccount("kc-stats-subject-3", "stats-tester-3@example.com");
+
+		UUID inFlowEventId = createEvent(3);
+		completeEvent(inFlowEventId, 3); // sum 6 -> in flow
+
+		LocalDate today = LocalDate.now(ZoneOffset.UTC);
+		MvcResult result = mockMvc.perform(get("/api/v1/statistics/personal/trend")
+				.param("accountId", accountId.toString())
+				.param("rangeStart", today.minusDays(1).toString())
+				.param("rangeEndExclusive", today.plusDays(2).toString())
+				.with(jwt().jwt(asUser)))
+			.andExpect(status().isOk())
+			.andReturn();
+
+		JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+		assertThat(body.get("points")).hasSize(3);
+		assertThat(body.get("points").get(0).get("totalEvents").asLong()).isZero(); // yesterday
+		JsonNode todayPoint = body.get("points").get(1);
+		assertThat(todayPoint.get("date").asText()).isEqualTo(today.toString());
+		assertThat(todayPoint.get("totalEvents").asLong()).isEqualTo(1);
+		assertThat(todayPoint.get("completedEvents").asLong()).isEqualTo(1);
+		assertThat(todayPoint.get("flowPercentage").asDouble()).isEqualTo(100.0);
+		assertThat(body.get("points").get(2).get("totalEvents").asLong()).isZero(); // tomorrow
+	}
+
+	@Test
+	void personalTrendRejectsAnInvalidRange() throws Exception {
+		setUpAccount("kc-stats-subject-4", "stats-tester-4@example.com");
+
+		LocalDate today = LocalDate.now(ZoneOffset.UTC);
+		mockMvc.perform(get("/api/v1/statistics/personal/trend")
+				.param("accountId", accountId.toString())
+				.param("rangeStart", today.toString())
+				.param("rangeEndExclusive", today.toString())
+				.with(jwt().jwt(asUser)))
+			.andExpect(status().isBadRequest());
 	}
 
 	private void setUpAccount(String subject, String email) throws Exception {

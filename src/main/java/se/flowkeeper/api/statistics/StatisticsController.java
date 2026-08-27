@@ -32,6 +32,16 @@ public class StatisticsController {
 		return statisticsService.personalStatistics(jwt, accountId, period, date);
 	}
 
+	/** Day-by-day Flow % trend for the caller's own personal statistics, over an explicit [rangeStart, rangeEndExclusive) range. */
+	@GetMapping("/api/v1/statistics/personal/trend")
+	public PersonalTrendResponse personalTrend(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeStart,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeEndExclusive) {
+		return statisticsService.personalTrend(jwt, accountId, rangeStart, rangeEndExclusive);
+	}
+
 	/** A group's rolled-up Flow % — never one individual's number. See AggregateStatisticsResponse. */
 	@GetMapping("/api/v1/statistics/group")
 	public AggregateStatisticsResponse group(
@@ -52,6 +62,38 @@ public class StatisticsController {
 			@RequestParam StatisticsPeriod period,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
 		return statisticsService.departmentStatistics(jwt, accountId, departmentId, period, date);
+	}
+
+	/** Same scope and authorization as {@code /api/v1/statistics/group}, but a day-by-day trend over an explicit date range. */
+	@GetMapping("/api/v1/statistics/group/trend")
+	public AggregateTrendResponse groupTrend(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam UUID groupId,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeStart,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeEndExclusive) {
+		return statisticsService.groupTrend(jwt, accountId, groupId, rangeStart, rangeEndExclusive);
+	}
+
+	/** Same scope and authorization as {@code /api/v1/statistics/department}, but a day-by-day trend over an explicit date range. */
+	@GetMapping("/api/v1/statistics/department/trend")
+	public AggregateTrendResponse departmentTrend(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam UUID departmentId,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeStart,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeEndExclusive) {
+		return statisticsService.departmentTrend(jwt, accountId, departmentId, rangeStart, rangeEndExclusive);
+	}
+
+	/** Same scope and authorization as {@code /api/v1/statistics/organisation}, but a day-by-day trend over an explicit date range. */
+	@GetMapping("/api/v1/statistics/organisation/trend")
+	public AggregateTrendResponse organisationTrend(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeStart,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeEndExclusive) {
+		return statisticsService.organisationTrend(jwt, accountId, rangeStart, rangeEndExclusive);
 	}
 
 	/** The whole organisation's rolled-up Flow % — the OWNER's view only. */

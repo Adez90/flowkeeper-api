@@ -11,6 +11,8 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.AccountType;
 import se.flowkeeper.api.account.MemberRole;
+import se.flowkeeper.api.common.ValidationException;
+import se.flowkeeper.api.event.EventStatus;
 import se.flowkeeper.api.organisation.Department;
 import se.flowkeeper.api.organisation.DepartmentRepository;
 import se.flowkeeper.api.organisation.Group;
@@ -288,6 +290,106 @@ class StatisticsServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(adminMembership));
 
 		assertThatThrownBy(() -> service().organisationFeedback(jwt, accountId))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void personalTrendBucketsEventsByLocalDayAndComputesFlowPercentagePerDay() {
+		UUID accountId = UUID.randomUUID();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+
+		// Day 1 (Mar 12): one completed in-flow (3+3=6), one completed not in-flow (1+1=2).
+		// Day 2 (Mar 13): nothing.
+		// Day 3 (Mar 14): one still-open event (no outgoingEnergy).
+		when(eventStatisticsRepository.findTrendRows(any(), any(), any())).thenReturn(List.of(
+			new TrendRow(LocalDate.of(2026, 3, 12).atStartOfDay(ZoneId.of("UTC")).plusHours(9).toInstant(),
+				EventStatus.COMPLETED, (short) 3, (short) 3),
+			new TrendRow(LocalDate.of(2026, 3, 12).atStartOfDay(ZoneId.of("UTC")).plusHours(15).toInstant(),
+				EventStatus.COMPLETED, (short) 1, (short) 1),
+			new TrendRow(LocalDate.of(2026, 3, 14).atStartOfDay(ZoneId.of("UTC")).plusHours(8).toInstant(),
+				EventStatus.OPEN, (short) 2, null)));
+
+		PersonalTrendResponse response = service().personalTrend(
+			jwt, accountId, LocalDate.of(2026, 3, 12), LocalDate.of(2026, 3, 15));
+
+		assertThat(response.rangeStart()).isEqualTo(LocalDate.of(2026, 3, 12));
+		assertThat(response.rangeEndExclusive()).isEqualTo(LocalDate.of(2026, 3, 15));
+		assertThat(response.points()).hasSize(3);
+
+		TrendPoint day1 = response.points().get(0);
+		assertThat(day1.date()).isEqualTo(LocalDate.of(2026, 3, 12));
+		assertThat(day1.totalEvents()).isEqualTo(2);
+		assertThat(day1.completedEvents()).isEqualTo(2);
+		assertThat(day1.flowPercentage()).isEqualTo(50.0); // 1 of 2 completed in flow
+
+		TrendPoint day2 = response.points().get(1);
+		assertThat(day2.date()).isEqualTo(LocalDate.of(2026, 3, 13));
+		assertThat(day2.totalEvents()).isZero();
+		assertThat(day2.flowPercentage()).isZero();
+
+		TrendPoint day3 = response.points().get(2);
+		assertThat(day3.date()).isEqualTo(LocalDate.of(2026, 3, 14));
+		assertThat(day3.totalEvents()).isEqualTo(1);
+		assertThat(day3.completedEvents()).isZero();
+		assertThat(day3.flowPercentage()).isZero();
+	}
+
+	@Test
+	void personalTrendRejectsAnEndDateThatIsNotAfterStart() {
+		UUID accountId = UUID.randomUUID();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+
+		assertThatThrownBy(() -> service().personalTrend(jwt, accountId, LocalDate.of(2026, 3, 12), LocalDate.of(2026, 3, 12)))
+			.isInstanceOf(ValidationException.class);
+	}
+
+	@Test
+	void personalTrendRejectsARangeLongerThanTheMaximum() {
+		UUID accountId = UUID.randomUUID();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+
+		assertThatThrownBy(() -> service().personalTrend(jwt, accountId, LocalDate.of(2026, 1, 1), LocalDate.of(2027, 1, 1)))
+			.isInstanceOf(ValidationException.class);
+	}
+
+	@Test
+	void groupTrendBelowMinimumSizeWithholdsPoints() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember coachMembership = new AccountMember(account, user, MemberRole.COACH, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(coachMembership));
+		when(groupRepository.findByIdAndAccount_Id(groupId, accountId)).thenReturn(Optional.of(group));
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(
+			new AccountMember(account, user, MemberRole.COACH, null, group)));
+
+		AggregateTrendResponse response = service().groupTrend(
+			jwt, accountId, groupId, LocalDate.of(2026, 3, 12), LocalDate.of(2026, 3, 15));
+
+		assertThat(response.belowMinimumSize()).isTrue();
+		assertThat(response.memberCount()).isEqualTo(1);
+		assertThat(response.points()).isNull();
+	}
+
+	@Test
+	void organisationTrendOnlyVisibleToOwner() {
+		UUID accountId = UUID.randomUUID();
+		Department department = new Department(account, "Engineering");
+		AccountMember adminMembership = new AccountMember(account, user, MemberRole.ADMIN, department, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(adminMembership));
+
+		assertThatThrownBy(() -> service().organisationTrend(jwt, accountId, LocalDate.of(2026, 3, 12), LocalDate.of(2026, 3, 15)))
 			.isInstanceOf(AccessDeniedException.class);
 	}
 

@@ -89,6 +89,31 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 		@Param("accountId") UUID accountId, @Param("userIds") Collection<UUID> userIds,
 		@Param("start") Instant start, @Param("end") Instant end);
 
+	// One query for the whole trend range rather than one per day: fetch the
+	// minimal per-event fields needed and bucket by local day in Java (see
+	// StatisticsService#bucketByDay), since JPQL/Postgres date_trunc can't be
+	// parameterized by a per-user IANA zone the way a repeated Instant-range
+	// query already handles elsewhere in this class.
+	@Query("""
+		select new se.flowkeeper.api.statistics.TrendRow(e.startedAt, e.status, e.ingoingEnergy, e.outgoingEnergy)
+		from Event e
+		where e.account.id = :accountId and e.startedAt >= :start and e.startedAt < :end
+		""")
+	List<TrendRow> findTrendRows(@Param("accountId") UUID accountId, @Param("start") Instant start, @Param("end") Instant end);
+
+	// Same shape as findTrendRows, scoped to a specific set of users — how a
+	// group/department/organisation trend is computed. Only ever called once
+	// the caller's already confirmed the minimum-size-for-privacy threshold
+	// is met, same guarantee as aggregateOverallForUsers.
+	@Query("""
+		select new se.flowkeeper.api.statistics.TrendRow(e.startedAt, e.status, e.ingoingEnergy, e.outgoingEnergy)
+		from Event e
+		where e.account.id = :accountId and e.user.id in :userIds and e.startedAt >= :start and e.startedAt < :end
+		""")
+	List<TrendRow> findTrendRowsForUsers(
+		@Param("accountId") UUID accountId, @Param("userIds") Collection<UUID> userIds,
+		@Param("start") Instant start, @Param("end") Instant end);
+
 	// Every event its own owner has opted in to anonymous organisation-wide
 	// feedback (Event.shareAnonymously) — deliberately selects no user/event
 	// id, only the type label, the notes themselves, and when it happened.
