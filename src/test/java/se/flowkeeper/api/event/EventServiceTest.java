@@ -52,7 +52,7 @@ class EventServiceTest {
 		when(eventRepository.save(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
 
 		EventResponse response = service().createEvent(jwt,
-			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, "starting a call"));
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, "starting a call", null, null, null, null));
 
 		assertThat(response.status()).isEqualTo("OPEN");
 		assertThat(response.ingoingEnergy()).isEqualTo((short) 3);
@@ -64,8 +64,85 @@ class EventServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());
 
 		assertThatThrownBy(() -> service().createEvent(jwt,
-			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, null)))
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, null, null, null, null, null)))
 			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void createEventAcceptsABackdatedStartTime() {
+		EventType type = defaultEventType();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(type));
+		when(eventRepository.save(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
+
+		Instant yesterday = Instant.now().minusSeconds(86_400);
+		EventResponse response = service().createEvent(jwt,
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, null, yesterday, null, null, null));
+
+		assertThat(response.status()).isEqualTo("OPEN");
+		assertThat(response.startedAt()).isEqualTo(yesterday);
+	}
+
+	@Test
+	void createEventRejectsAStartTimeInTheFuture() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(defaultEventType()));
+
+		Instant tomorrow = Instant.now().plusSeconds(86_400);
+		assertThatThrownBy(() -> service().createEvent(jwt,
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, null, tomorrow, null, null, null)))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
+	}
+
+	@Test
+	void createEventLogsAFullyHistoricalActivityAlreadyCompleted() {
+		EventType type = defaultEventType();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(type));
+		when(eventRepository.save(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
+
+		Instant start = Instant.now().minusSeconds(7200);
+		Instant end = Instant.now().minusSeconds(3600);
+		EventResponse response = service().createEvent(jwt,
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, "felt rushed", start, (short) 4, "better after", end));
+
+		assertThat(response.status()).isEqualTo("COMPLETED");
+		assertThat(response.startedAt()).isEqualTo(start);
+		assertThat(response.completedAt()).isEqualTo(end);
+		assertThat(response.outgoingEnergy()).isEqualTo((short) 4);
+		assertThat(response.outgoingNote()).isEqualTo("better after");
+	}
+
+	@Test
+	void createEventRejectsACompletedTimeBeforeTheStartTime() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(defaultEventType()));
+
+		Instant start = Instant.now().minusSeconds(3600);
+		Instant end = Instant.now().minusSeconds(7200); // before start
+		assertThatThrownBy(() -> service().createEvent(jwt,
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, null, start, (short) 4, null, end)))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
+	}
+
+	@Test
+	void createEventRejectsACompletedTimeWithoutOutgoingEnergy() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(defaultEventType()));
+
+		assertThatThrownBy(() -> service().createEvent(jwt,
+			new CreateEventRequest(UUID.randomUUID(), UUID.randomUUID(), (short) 3, null, null, null, null, Instant.now())))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
 	}
 
 	@Test

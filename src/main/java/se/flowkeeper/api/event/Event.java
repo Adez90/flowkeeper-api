@@ -79,19 +79,29 @@ public class Event {
 	}
 
 	public Event(User user, Account account, EventType eventType, short ingoingEnergy, String ingoingNote) {
+		this(user, account, eventType, ingoingEnergy, ingoingNote, Instant.now());
+	}
+
+	/** Same as the 5-arg constructor, but with an explicit startedAt — how a historical (backdated) activity is logged. */
+	public Event(User user, Account account, EventType eventType, short ingoingEnergy, String ingoingNote, Instant startedAt) {
 		this.user = user;
 		this.account = account;
 		this.eventType = eventType;
 		this.status = EventStatus.OPEN;
 		this.ingoingEnergy = ingoingEnergy;
 		this.ingoingNote = ingoingNote;
-		this.startedAt = Instant.now();
+		this.startedAt = startedAt;
 	}
 
 	public void complete(short outgoingEnergy, String outgoingNote) {
+		complete(outgoingEnergy, outgoingNote, Instant.now());
+	}
+
+	/** Same as the 2-arg overload, but with an explicit completedAt — how a historical activity is marked done at the same time it's logged. */
+	public void complete(short outgoingEnergy, String outgoingNote, Instant completedAt) {
 		this.outgoingEnergy = outgoingEnergy;
 		this.outgoingNote = outgoingNote;
-		this.completedAt = Instant.now();
+		this.completedAt = completedAt;
 		this.status = EventStatus.COMPLETED;
 	}
 

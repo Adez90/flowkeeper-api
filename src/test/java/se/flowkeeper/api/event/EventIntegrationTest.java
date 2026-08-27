@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import se.flowkeeper.api.AbstractIntegrationTest;
 
+import java.time.Instant;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -89,6 +90,74 @@ class EventIntegrationTest extends AbstractIntegrationTest {
 				.with(jwt().jwt(asUser)))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$").isEmpty());
+	}
+
+	/**
+	 * Uses its own subject/account rather than the class's shared one — the
+	 * shared account above accumulates events across every @Test method in
+	 * this class (same Postgres container, no per-test rollback), and this
+	 * test's assertions on exactly which events exist would break if it ran
+	 * after (or before) another test that also touches that account.
+	 */
+	@Test
+	void logsAFullyHistoricalActivityAlreadyCompletedInOneCall() throws Exception {
+		Consumer<Jwt.Builder> asHistoricalUser = b -> b
+			.subject("kc-event-historical").claim("name", "Historical Tester").claim("email", "event-historical@example.com");
+		MvcResult registration = mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asHistoricalUser))).andReturn();
+		UUID historicalAccountId = UUID.fromString(
+			objectMapper.readTree(registration.getResponse().getContentAsString()).get("personalAccountId").asText());
+
+		JsonNode types = objectMapper.readTree(mockMvc.perform(
+				get("/api/v1/event-types").param("accountId", historicalAccountId.toString()).with(jwt().jwt(asHistoricalUser)))
+			.andReturn().getResponse().getContentAsString());
+		UUID eventTypeId = UUID.fromString(types.get(0).get("id").asText());
+
+		Instant startedAt = Instant.now().minusSeconds(7200);
+		Instant completedAt = Instant.now().minusSeconds(3600);
+		String body = """
+			{"accountId":"%s","eventTypeId":"%s","ingoingEnergy":3,"ingoingNote":"felt rushed",
+			 "startedAt":"%s","outgoingEnergy":4,"outgoingNote":"better after","completedAt":"%s"}
+			""".formatted(historicalAccountId, eventTypeId, startedAt, completedAt);
+
+		mockMvc.perform(post("/api/v1/events")
+				.with(jwt().jwt(asHistoricalUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.status").value("COMPLETED"))
+			.andExpect(jsonPath("$.outgoingEnergy").value(4))
+			.andExpect(jsonPath("$.outgoingNote").value("better after"));
+
+		// Already completed the moment it's logged — never shows up as OPEN.
+		mockMvc.perform(get("/api/v1/events").param("accountId", historicalAccountId.toString()).param("status", "OPEN")
+				.with(jwt().jwt(asHistoricalUser)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$").isEmpty());
+	}
+
+	@Test
+	void rejectsAStartTimeInTheFuture() throws Exception {
+		Consumer<Jwt.Builder> asFutureUser = b -> b
+			.subject("kc-event-future").claim("name", "Future Tester").claim("email", "event-future@example.com");
+		MvcResult registration = mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asFutureUser))).andReturn();
+		UUID futureAccountId = UUID.fromString(
+			objectMapper.readTree(registration.getResponse().getContentAsString()).get("personalAccountId").asText());
+
+		JsonNode types = objectMapper.readTree(mockMvc.perform(
+				get("/api/v1/event-types").param("accountId", futureAccountId.toString()).with(jwt().jwt(asFutureUser)))
+			.andReturn().getResponse().getContentAsString());
+		UUID eventTypeId = UUID.fromString(types.get(0).get("id").asText());
+
+		Instant tomorrow = Instant.now().plusSeconds(86_400);
+		String body = """
+			{"accountId":"%s","eventTypeId":"%s","ingoingEnergy":3,"ingoingNote":null,"startedAt":"%s"}
+			""".formatted(futureAccountId, eventTypeId, tomorrow);
+
+		mockMvc.perform(post("/api/v1/events")
+				.with(jwt().jwt(asFutureUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+			.andExpect(status().isBadRequest());
 	}
 
 	@Test

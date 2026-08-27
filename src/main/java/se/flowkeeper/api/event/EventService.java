@@ -11,9 +11,11 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.common.ConflictException;
 import se.flowkeeper.api.common.ResourceNotFoundException;
+import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -48,11 +50,32 @@ public class EventService {
 			throw new ResourceNotFoundException("Event type does not belong to this account: " + request.eventTypeId());
 		}
 
-		Event event = eventRepository.save(
-			new Event(user, account, eventType, request.ingoingEnergy(), request.ingoingNote()));
+		Instant now = Instant.now();
+		Instant startedAt = request.startedAt() != null ? request.startedAt() : now;
+		if (startedAt.isAfter(now)) {
+			throw new ValidationException("startedAt cannot be in the future");
+		}
 
-		log.info("User {} logged event {} ({}) in account {}",
-			user.getId(), event.getId(), eventType.getCode(), account.getId());
+		Event event = new Event(user, account, eventType, request.ingoingEnergy(), request.ingoingNote(), startedAt);
+
+		if (request.outgoingEnergy() != null) {
+			Instant completedAt = request.completedAt() != null ? request.completedAt() : now;
+			if (completedAt.isAfter(now)) {
+				throw new ValidationException("completedAt cannot be in the future");
+			}
+			if (completedAt.isBefore(startedAt)) {
+				throw new ValidationException("completedAt cannot be before startedAt");
+			}
+			event.complete(request.outgoingEnergy(), request.outgoingNote(), completedAt);
+		} else if (request.completedAt() != null) {
+			throw new ValidationException("completedAt requires outgoingEnergy");
+		}
+
+		event = eventRepository.save(event);
+
+		log.info("User {} logged event {} ({}) in account {}{}",
+			user.getId(), event.getId(), eventType.getCode(), account.getId(),
+			event.getStatus() == EventStatus.COMPLETED ? " (historical, already completed)" : "");
 
 		return EventResponse.from(event);
 	}
