@@ -60,6 +60,9 @@ public class Event {
 	@Column(name = "outgoing_note")
 	private String outgoingNote;
 
+	@Column(name = "share_anonymously", nullable = false)
+	private boolean shareAnonymously;
+
 	@Column(name = "started_at", nullable = false)
 	private Instant startedAt;
 
@@ -90,6 +93,11 @@ public class Event {
 		this.outgoingNote = outgoingNote;
 		this.completedAt = Instant.now();
 		this.status = EventStatus.COMPLETED;
+	}
+
+	/** Only the event's own owner may opt its notes in or out of anonymous organisation-wide feedback — see AnonymousFeedbackService. */
+	public void updateAnonymousSharing(boolean shareAnonymously) {
+		this.shareAnonymously = shareAnonymously;
 	}
 
 	@PrePersist
@@ -140,6 +148,10 @@ public class Event {
 
 	public String getOutgoingNote() {
 		return outgoingNote;
+	}
+
+	public boolean isShareAnonymously() {
+		return shareAnonymously;
 	}
 
 	public Instant getStartedAt() {

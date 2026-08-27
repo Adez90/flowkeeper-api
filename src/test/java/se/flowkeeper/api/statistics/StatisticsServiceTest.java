@@ -237,6 +237,59 @@ class StatisticsServiceTest {
 	}
 
 	@Test
+	void organisationFeedbackWithheldBelowTenMembers() {
+		UUID accountId = UUID.randomUUID();
+		AccountMember ownerMembership = new AccountMember(account, user, MemberRole.OWNER);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(ownerMembership));
+		when(accountMemberRepository.findByAccount_Id(accountId)).thenReturn(List.of(ownerMembership));
+
+		OrganisationFeedbackResponse response = service().organisationFeedback(jwt, accountId);
+
+		assertThat(response.belowMinimumSize()).isTrue();
+		assertThat(response.memberCount()).isEqualTo(1);
+		assertThat(response.items()).isEmpty();
+	}
+
+	@Test
+	void organisationFeedbackReturnsOptedInNotesOnceAboveTenMembers() {
+		UUID accountId = UUID.randomUUID();
+		AccountMember ownerMembership = new AccountMember(account, user, MemberRole.OWNER);
+		List<AccountMember> tenMembers = java.util.stream.Stream.concat(
+			java.util.stream.Stream.of(ownerMembership),
+			java.util.stream.IntStream.range(0, 9)
+				.mapToObj(i -> new AccountMember(account, new User("kc-" + i, "U" + i, "u" + i + "@example.com"), MemberRole.MEMBER)))
+			.toList();
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(ownerMembership));
+		when(accountMemberRepository.findByAccount_Id(accountId)).thenReturn(tenMembers);
+		when(eventStatisticsRepository.findAnonymousFeedback(accountId)).thenReturn(List.of(
+			new AnonymousFeedbackItem("Meeting", "felt rushed", "still rushed", Instant.now())));
+
+		OrganisationFeedbackResponse response = service().organisationFeedback(jwt, accountId);
+
+		assertThat(response.belowMinimumSize()).isFalse();
+		assertThat(response.memberCount()).isEqualTo(10);
+		assertThat(response.items()).hasSize(1);
+		assertThat(response.items().get(0).eventTypeLabel()).isEqualTo("Meeting");
+	}
+
+	@Test
+	void organisationFeedbackOnlyVisibleToOwner() {
+		UUID accountId = UUID.randomUUID();
+		Department department = new Department(account, "Engineering");
+		AccountMember adminMembership = new AccountMember(account, user, MemberRole.ADMIN, department, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(adminMembership));
+
+		assertThatThrownBy(() -> service().organisationFeedback(jwt, accountId))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
 	void rejectsNonMember() {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());

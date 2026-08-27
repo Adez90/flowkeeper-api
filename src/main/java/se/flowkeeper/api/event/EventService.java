@@ -80,6 +80,23 @@ public class EventService {
 		return EventResponse.from(event);
 	}
 
+	/** Only the event's own owner can opt its notes in or out of anonymous organisation-wide feedback. */
+	@Transactional
+	public EventResponse updateSharing(Jwt jwt, UUID eventId, UpdateEventSharingRequest request) {
+		User user = currentUserResolver.require(jwt);
+		Event event = eventRepository.findById(eventId)
+			.orElseThrow(() -> new ResourceNotFoundException("No such event: " + eventId));
+
+		if (!event.getUser().equals(user)) {
+			throw new AccessDeniedException("Not your event");
+		}
+
+		event.updateAnonymousSharing(request.shareAnonymously());
+		log.info("User {} set share-anonymously={} on event {}", user.getId(), request.shareAnonymously(), eventId);
+
+		return EventResponse.from(event);
+	}
+
 	@Transactional(readOnly = true)
 	public List<EventResponse> listEvents(Jwt jwt, UUID accountId, EventStatus statusFilter) {
 		User user = currentUserResolver.require(jwt);

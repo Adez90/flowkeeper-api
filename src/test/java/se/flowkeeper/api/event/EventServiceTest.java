@@ -104,6 +104,31 @@ class EventServiceTest {
 			.isInstanceOf(ResourceNotFoundException.class);
 	}
 
+	@Test
+	void updateSharingLetsTheOwnerOptTheirEventIn() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, "note");
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		EventResponse response = service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true));
+
+		assertThat(response.shareAnonymously()).isTrue();
+		assertThat(event.isShareAnonymously()).isTrue();
+	}
+
+	@Test
+	void updateSharingRejectsSomeoneElsesEvent() {
+		User someoneElse = new User("kc-subject-2", "Other Person", "other@example.com");
+		Event event = new Event(someoneElse, account, defaultEventType(), (short) 3, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
 	private EventType defaultEventType() {
 		return org.mockito.Mockito.mock(EventType.class);
 	}

@@ -234,6 +234,34 @@ public class StatisticsService {
 		return new OrganisationTypeStatisticsResponse(period, rangeStart, rangeEnd, memberCount, false, byType);
 	}
 
+	/**
+	 * The organisation OWNER's "what's working, what's not" view: every
+	 * event note its own owner has opted in to anonymous sharing
+	 * (Event.shareAnonymously), never attributed back to whoever wrote it.
+	 * Gated the same as the by-type breakdown: withheld below
+	 * MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS members. Not time-boxed by
+	 * period — a standing view, not a per-day/week/month rollup.
+	 */
+	@Transactional(readOnly = true)
+	public OrganisationFeedbackResponse organisationFeedback(Jwt jwt, UUID accountId) {
+		User viewer = currentUserResolver.require(jwt);
+		AccountMember viewerMembership = requireMembership(accountId, viewer);
+
+		if (viewerMembership.getRole() != MemberRole.OWNER) {
+			throw new AccessDeniedException(
+				"User %s is not the OWNER of account %s".formatted(viewer.getId(), accountId));
+		}
+
+		int memberCount = accountMemberRepository.findByAccount_Id(accountId).size();
+		if (memberCount < MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS) {
+			log.debug("Anonymous feedback for account {} has only {} member(s), below the minimum of {} — withholding",
+				accountId, memberCount, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS);
+			return new OrganisationFeedbackResponse(memberCount, true, List.of());
+		}
+
+		return new OrganisationFeedbackResponse(memberCount, false, eventStatisticsRepository.findAnonymousFeedback(accountId));
+	}
+
 	private AggregateStatisticsResponse buildAggregateResponse(
 			User viewer, UUID accountId, List<UUID> memberUserIds, StatisticsPeriod period, LocalDate referenceDate) {
 		ZoneId zone = resolveZone(viewer);

@@ -13,6 +13,7 @@ public record EventResponse(
 	String ingoingNote,
 	Short outgoingEnergy,
 	String outgoingNote,
+	boolean shareAnonymously,
 	Instant startedAt,
 	Instant completedAt
 ) {
@@ -28,6 +29,7 @@ public record EventResponse(
 			event.getIngoingNote(),
 			event.getOutgoingEnergy(),
 			event.getOutgoingNote(),
+			event.isShareAnonymously(),
 			event.getStartedAt(),
 			event.getCompletedAt()
 		);

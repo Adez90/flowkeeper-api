@@ -74,4 +74,12 @@ public class StatisticsController {
 		return statisticsService.organisationTypeStatistics(jwt, accountId, period, date);
 	}
 
+	/** Anonymous, opted-in event notes across the whole organisation — the OWNER's view only. See OrganisationFeedbackResponse. */
+	@GetMapping("/api/v1/statistics/organisation/feedback")
+	public OrganisationFeedbackResponse organisationFeedback(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId) {
+		return statisticsService.organisationFeedback(jwt, accountId);
+	}
+
 }
