@@ -181,7 +181,7 @@ class MeIntegrationTest extends AbstractIntegrationTest {
 
 		MockMultipartFile file = new MockMultipartFile("file", "me.png", "image/png", new byte[] {1, 2, 3, 4});
 
-		MvcResult uploadResult = mockMvc.perform(multipart("/api/v1/me/avatar", file)
+		MvcResult uploadResult = mockMvc.perform(multipart("/api/v1/me/avatar").file(file)
 				.with(jwt().jwt(jwtBuilder -> jwtBuilder
 					.subject("kc-avatar-subject")
 					.claim("name", "Avatar Test")
@@ -219,7 +219,7 @@ class MeIntegrationTest extends AbstractIntegrationTest {
 
 		MockMultipartFile file = new MockMultipartFile("file", "me.gif", "image/gif", new byte[] {1});
 
-		mockMvc.perform(multipart("/api/v1/me/avatar", file)
+		mockMvc.perform(multipart("/api/v1/me/avatar").file(file)
 				.with(jwt().jwt(jwtBuilder -> jwtBuilder
 					.subject("kc-badavatar-subject")
 					.claim("name", "Bad Avatar")
