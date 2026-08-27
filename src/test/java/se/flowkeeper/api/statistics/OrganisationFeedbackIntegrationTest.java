@@ -120,8 +120,12 @@ class OrganisationFeedbackIntegrationTest extends AbstractIntegrationTest {
 
 	@Test
 	void aMemberCannotOptInSomeoneElsesEvent() throws Exception {
-		Consumer<Jwt.Builder> asOwner = userJwt("kc-ofb-owner-3", "Owner", "ofb-owner-3@example.com");
-		Consumer<Jwt.Builder> asMember = userJwt("kc-ofb-member-3", "Member", "ofb-member-3@example.com");
+		// Deliberately not "-member-3" — the first test's loop already
+		// registers kc-ofb-member-1..9, and this shared Postgres has no
+		// per-test rollback (see class javadoc), so that subject would
+		// already exist here.
+		Consumer<Jwt.Builder> asOwner = userJwt("kc-ofb-owner-solo", "Owner", "ofb-owner-solo@example.com");
+		Consumer<Jwt.Builder> asMember = userJwt("kc-ofb-member-solo", "Member", "ofb-member-solo@example.com");
 		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOwner))).andExpect(status().isCreated());
 		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asMember))).andExpect(status().isCreated());
 		UUID accountId = UUID.fromString(readJson(mockMvc.perform(post("/api/v1/organisations")
@@ -132,7 +136,7 @@ class OrganisationFeedbackIntegrationTest extends AbstractIntegrationTest {
 				.with(jwt().jwt(asOwner))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-					{"email":"ofb-member-3@example.com","role":"MEMBER"}
+					{"email":"ofb-member-solo@example.com","role":"MEMBER"}
 					""")).andExpect(status().isCreated());
 
 		UUID eventId = logAndCompleteOneEvent(accountId, asOwner, "owner's note", "owner's outcome");
