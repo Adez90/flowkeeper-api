@@ -1,6 +1,7 @@
 package se.flowkeeper.api.statistics;
 
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,7 +25,7 @@ public class StatisticsController {
 	 */
 	@GetMapping("/api/v1/statistics/personal")
 	public PersonalStatisticsResponse personal(
-			Jwt jwt,
+			@AuthenticationPrincipal Jwt jwt,
 			@RequestParam UUID accountId,
 			@RequestParam StatisticsPeriod period,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {

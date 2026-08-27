@@ -2,6 +2,7 @@ package se.flowkeeper.api.registration;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,7 +21,7 @@ public class RegistrationController {
 	 * Keycloak login. Idempotent — safe to call again.
 	 */
 	@PostMapping("/api/v1/registration")
-	public ResponseEntity<RegistrationResponse> register(Jwt jwt) {
+	public ResponseEntity<RegistrationResponse> register(@AuthenticationPrincipal Jwt jwt) {
 		RegistrationResponse response = registrationService.registerCurrentUser(jwt);
 		HttpStatus status = response.alreadyRegistered() ? HttpStatus.OK : HttpStatus.CREATED;
 		return ResponseEntity.status(status).body(response);

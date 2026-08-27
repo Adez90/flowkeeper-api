@@ -1,5 +1,6 @@
 package se.flowkeeper.api.web;
 
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,7 +16,7 @@ import java.util.Map;
 public class PingController {
 
 	@GetMapping("/api/v1/ping")
-	public Map<String, Object> ping(Jwt jwt) {
+	public Map<String, Object> ping(@AuthenticationPrincipal Jwt jwt) {
 		return Map.of(
 			"message", "pong",
 			"subject", jwt.getSubject(),
