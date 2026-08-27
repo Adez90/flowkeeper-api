@@ -52,7 +52,7 @@ class StatisticsServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
 		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
-			.thenReturn(new OverallCounts(5L, 3L, 3.4, -0.5));
+			.thenReturn(new OverallCounts(5L, 3L, 2L, 3.4, -0.5));
 		when(eventStatisticsRepository.aggregateByType(any(), any(), any()))
 			.thenReturn(List.of(new TypeCounts(UUID.randomUUID(), "Meeting", 2L, -1.0)));
 
@@ -65,6 +65,8 @@ class StatisticsServiceTest {
 		assertThat(response.completedEvents()).isEqualTo(3);
 		assertThat(response.openEvents()).isEqualTo(2);
 		assertThat(response.averageEnergyDelta()).isEqualTo(-0.5);
+		// 2 of 3 completed events "in flow" -> 66.67%
+		assertThat(response.flowPercentage()).isCloseTo(66.6667, org.assertj.core.data.Offset.offset(0.01));
 		assertThat(response.byType()).hasSize(1);
 		assertThat(response.byType().get(0).label()).isEqualTo("Meeting");
 	}
@@ -76,7 +78,7 @@ class StatisticsServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
 		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
-			.thenReturn(new OverallCounts(0L, 0L, null, null));
+			.thenReturn(new OverallCounts(0L, 0L, 0L, null, null));
 		when(eventStatisticsRepository.aggregateByType(any(), any(), any()))
 			.thenReturn(List.of());
 
@@ -87,6 +89,7 @@ class StatisticsServiceTest {
 		assertThat(response.completedEvents()).isZero();
 		assertThat(response.openEvents()).isZero();
 		assertThat(response.averageIngoingEnergy()).isNull();
+		assertThat(response.flowPercentage()).isZero();
 		assertThat(response.byType()).isEmpty();
 	}
 
@@ -100,7 +103,7 @@ class StatisticsServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, stockholmUser, MemberRole.OWNER)));
 		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
-			.thenReturn(new OverallCounts(0L, 0L, null, null));
+			.thenReturn(new OverallCounts(0L, 0L, 0L, null, null));
 		when(eventStatisticsRepository.aggregateByType(any(), any(), any())).thenReturn(List.of());
 
 		// Stockholm is UTC+2 in June (daylight saving) — chosen so this

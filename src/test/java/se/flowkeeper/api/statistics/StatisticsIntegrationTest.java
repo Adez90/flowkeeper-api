@@ -67,7 +67,29 @@ class StatisticsIntegrationTest extends AbstractIntegrationTest {
 		assertThat(body.get("openEvents").asLong()).isEqualTo(1);
 		assertThat(body.get("averageIngoingEnergy").asDouble()).isEqualTo(3.5);
 		assertThat(body.get("averageEnergyDelta").asDouble()).isEqualTo(-2.0);
+		// ingoing 4 + outgoing 2 = 6, inside the "in flow" 4-6 band.
+		assertThat(body.get("flowPercentage").asDouble()).isEqualTo(100.0);
 		assertThat(body.get("byType").get(0).get("count").asLong()).isEqualTo(2);
+	}
+
+	@Test
+	void flowPercentageOnlyCountsCompletedEventsInTheFourToSixBand() throws Exception {
+		UUID inFlowEventId = createEvent(3);
+		completeEvent(inFlowEventId, 3); // sum 6 -> in flow
+
+		UUID notInFlowEventId = createEvent(1);
+		completeEvent(notInFlowEventId, 1); // sum 2 -> not in flow
+
+		MvcResult result = mockMvc.perform(get("/api/v1/statistics/personal")
+				.param("accountId", accountId.toString())
+				.param("period", "DAY")
+				.with(jwt().jwt(asUser)))
+			.andExpect(status().isOk())
+			.andReturn();
+
+		JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+		assertThat(body.get("completedEvents").asLong()).isEqualTo(2);
+		assertThat(body.get("flowPercentage").asDouble()).isEqualTo(50.0);
 	}
 
 	private UUID createEvent(int ingoingEnergy) throws Exception {

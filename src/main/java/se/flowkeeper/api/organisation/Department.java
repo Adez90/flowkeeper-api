@@ -38,6 +38,9 @@ public class Department {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
+	@Column(name = "share_flow_with_peers", nullable = false)
+	private boolean shareFlowWithPeers = false;
+
 	protected Department() {
 	}
 
@@ -67,6 +70,15 @@ public class Department {
 
 	public Instant getCreatedAt() {
 		return createdAt;
+	}
+
+	public boolean isShareFlowWithPeers() {
+		return shareFlowWithPeers;
+	}
+
+	/** Only this department's own manager (a department-scoped ADMIN) makes this call. */
+	public void updateSharePreference(boolean shareFlowWithPeers) {
+		this.shareFlowWithPeers = shareFlowWithPeers;
 	}
 
 }

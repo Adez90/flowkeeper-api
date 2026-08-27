@@ -128,6 +128,58 @@ class OrganisationServiceTest {
 			.isInstanceOf(ConflictException.class);
 	}
 
+	@Test
+	void memberCanUpdateTheirOwnSharingPreference() {
+		User member = userFixture("kc-member");
+		Account org = orgFixture();
+		AccountMember membership = new AccountMember(org, member, MemberRole.MEMBER);
+
+		when(currentUserResolver.require(any())).thenReturn(member);
+		when(accountRepository.findById(org.getId())).thenReturn(Optional.of(org));
+		when(accountMemberRepository.findByAccount_IdAndUser(org.getId(), member)).thenReturn(Optional.of(membership));
+
+		MemberResponse response = service().updateMemberSharing(jwt(), org.getId(), new UpdateSharingRequest(true));
+
+		assertThat(response.shareFlowWithPeers()).isTrue();
+		assertThat(membership.isShareFlowWithPeers()).isTrue();
+	}
+
+	@Test
+	void groupSharingCanOnlyBeSetByThatGroupsOwnCoach() {
+		User coachOfOtherGroup = userFixture("kc-coach");
+		Account org = orgFixture();
+		Group targetGroup = new Group(org, null, "Backend team");
+		Group otherGroup = new Group(org, null, "Frontend team");
+		AccountMember membership = new AccountMember(org, coachOfOtherGroup, MemberRole.COACH, null, otherGroup);
+
+		when(currentUserResolver.require(any())).thenReturn(coachOfOtherGroup);
+		when(accountRepository.findById(org.getId())).thenReturn(Optional.of(org));
+		when(accountMemberRepository.findByAccount_IdAndUser(org.getId(), coachOfOtherGroup)).thenReturn(Optional.of(membership));
+		when(groupRepository.findByIdAndAccount_Id(any(), any())).thenReturn(Optional.of(targetGroup));
+
+		assertThatThrownBy(() -> service().updateGroupSharing(jwt(), org.getId(), UUID.randomUUID(), new UpdateSharingRequest(true)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void anOrgWideAdminWithNoDepartmentScopeCannotSetASpecificDepartmentsSharing() {
+		User orgWideAdmin = userFixture("kc-admin");
+		Account org = orgFixture();
+		Department department = new Department(org, "Engineering");
+		// department == null: manages the whole org's structure, but isn't
+		// THAT department's own manager — consent stays that department's
+		// own call, same as an individual's.
+		AccountMember membership = new AccountMember(org, orgWideAdmin, MemberRole.ADMIN, null, null);
+
+		when(currentUserResolver.require(any())).thenReturn(orgWideAdmin);
+		when(accountRepository.findById(org.getId())).thenReturn(Optional.of(org));
+		when(accountMemberRepository.findByAccount_IdAndUser(org.getId(), orgWideAdmin)).thenReturn(Optional.of(membership));
+		when(departmentRepository.findByIdAndAccount_Id(any(), any())).thenReturn(Optional.of(department));
+
+		assertThatThrownBy(() -> service().updateDepartmentSharing(jwt(), org.getId(), UUID.randomUUID(), new UpdateSharingRequest(true)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
 	private User userFixture(String subject) {
 		return new User(subject, "Test User " + subject, subject + "@example.com");
 	}

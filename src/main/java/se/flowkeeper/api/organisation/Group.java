@@ -44,6 +44,9 @@ public class Group {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
+	@Column(name = "share_flow_with_peers", nullable = false)
+	private boolean shareFlowWithPeers = false;
+
 	protected Group() {
 	}
 
@@ -78,6 +81,15 @@ public class Group {
 
 	public Instant getCreatedAt() {
 		return createdAt;
+	}
+
+	public boolean isShareFlowWithPeers() {
+		return shareFlowWithPeers;
+	}
+
+	/** Only this group's own manager (COACH) makes this call. */
+	public void updateSharePreference(boolean shareFlowWithPeers) {
+		this.shareFlowWithPeers = shareFlowWithPeers;
 	}
 
 }

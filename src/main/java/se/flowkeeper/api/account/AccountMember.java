@@ -54,6 +54,9 @@ public class AccountMember {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
+	@Column(name = "share_flow_with_peers", nullable = false)
+	private boolean shareFlowWithPeers = false;
+
 	protected AccountMember() {
 	}
 
@@ -105,6 +108,15 @@ public class AccountMember {
 
 	public Instant getCreatedAt() {
 		return createdAt;
+	}
+
+	public boolean isShareFlowWithPeers() {
+		return shareFlowWithPeers;
+	}
+
+	/** Only the member themselves makes this call — see the sharing design in the Blueprint. */
+	public void updateSharePreference(boolean shareFlowWithPeers) {
+		this.shareFlowWithPeers = shareFlowWithPeers;
 	}
 
 }

@@ -146,6 +146,61 @@ public class OrganisationService {
 			.toList();
 	}
 
+	/** A member's own choice to share their personal Flow % with the rest of their group. Nobody else can make this call for them. */
+	@Transactional
+	public MemberResponse updateMemberSharing(Jwt jwt, UUID accountId, UpdateSharingRequest request) {
+		User user = currentUserResolver.require(jwt);
+		requireOrganisation(accountId);
+		AccountMember membership = requireMembership(accountId, user);
+
+		membership.updateSharePreference(request.shareFlowWithPeers());
+		log.info("User {} set share-with-peers={} in organisation {}", user.getId(), request.shareFlowWithPeers(), accountId);
+
+		return MemberResponse.from(membership);
+	}
+
+	/** Only the group's own manager (a COACH scoped to that exact group) can set this. */
+	@Transactional
+	public GroupResponse updateGroupSharing(Jwt jwt, UUID accountId, UUID groupId, UpdateSharingRequest request) {
+		User user = currentUserResolver.require(jwt);
+		requireOrganisation(accountId);
+		AccountMember membership = requireMembership(accountId, user);
+
+		Group group = groupRepository.findByIdAndAccount_Id(groupId, accountId)
+			.orElseThrow(() -> new ResourceNotFoundException("No such group: " + groupId));
+		boolean managesThisGroup = membership.getRole() == MemberRole.COACH
+			&& membership.getGroup() != null && groupId.equals(membership.getGroup().getId());
+		if (!managesThisGroup) {
+			throw new AccessDeniedException("User %s does not manage group %s".formatted(user.getId(), groupId));
+		}
+
+		group.updateSharePreference(request.shareFlowWithPeers());
+		log.info("User {} set share-with-peers={} for group {}", user.getId(), request.shareFlowWithPeers(), groupId);
+
+		return GroupResponse.from(group);
+	}
+
+	/** Only the department's own manager (an ADMIN scoped to that exact department) can set this. */
+	@Transactional
+	public DepartmentResponse updateDepartmentSharing(Jwt jwt, UUID accountId, UUID departmentId, UpdateSharingRequest request) {
+		User user = currentUserResolver.require(jwt);
+		requireOrganisation(accountId);
+		AccountMember membership = requireMembership(accountId, user);
+
+		Department department = departmentRepository.findByIdAndAccount_Id(departmentId, accountId)
+			.orElseThrow(() -> new ResourceNotFoundException("No such department: " + departmentId));
+		boolean managesThisDepartment = membership.getRole() == MemberRole.ADMIN
+			&& membership.getDepartment() != null && departmentId.equals(membership.getDepartment().getId());
+		if (!managesThisDepartment) {
+			throw new AccessDeniedException("User %s does not manage department %s".formatted(user.getId(), departmentId));
+		}
+
+		department.updateSharePreference(request.shareFlowWithPeers());
+		log.info("User {} set share-with-peers={} for department {}", user.getId(), request.shareFlowWithPeers(), departmentId);
+
+		return DepartmentResponse.from(department);
+	}
+
 	private Account requireOrganisation(UUID accountId) {
 		Account account = accountRepository.findById(accountId)
 			.orElseThrow(() -> new ResourceNotFoundException("No such account: " + accountId));

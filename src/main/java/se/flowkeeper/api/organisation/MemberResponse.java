@@ -10,7 +10,8 @@ public record MemberResponse(
 	String email,
 	String role,
 	UUID departmentId,
-	UUID groupId
+	UUID groupId,
+	boolean shareFlowWithPeers
 ) {
 
 	public static MemberResponse from(AccountMember member) {
@@ -20,7 +21,8 @@ public record MemberResponse(
 			member.getUser().getEmail(),
 			member.getRole().name(),
 			member.getDepartment() != null ? member.getDepartment().getId() : null,
-			member.getGroup() != null ? member.getGroup().getId() : null);
+			member.getGroup() != null ? member.getGroup().getId() : null,
+			member.isShareFlowWithPeers());
 	}
 
 }

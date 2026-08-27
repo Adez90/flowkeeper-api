@@ -56,14 +56,16 @@ public class StatisticsService {
 
 		long total = overall.total() != null ? overall.total() : 0L;
 		long completed = overall.completed() != null ? overall.completed() : 0L;
+		long inFlow = overall.inFlow() != null ? overall.inFlow() : 0L;
+		double flowPercentage = completed != 0 ? (inFlow * 100.0 / completed) : 0.0;
 
-		log.debug("Computed {} statistics for account {} over [{}, {}) in {}: {} event(s), {} completed",
-			period, accountId, rangeStart, rangeEnd, zone, total, completed);
+		log.debug("Computed {} statistics for account {} over [{}, {}) in {}: {} event(s), {} completed, {}% in flow",
+			period, accountId, rangeStart, rangeEnd, zone, total, completed, flowPercentage);
 
 		return new PersonalStatisticsResponse(
 			period, rangeStart, rangeEnd,
 			total, completed, total - completed,
-			overall.averageIngoingEnergy(), overall.averageEnergyDelta(),
+			overall.averageIngoingEnergy(), overall.averageEnergyDelta(), flowPercentage,
 			byType);
 	}
 

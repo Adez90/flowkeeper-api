@@ -16,6 +16,7 @@ import java.util.function.Consumer;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -162,6 +163,79 @@ class OrganisationIntegrationTest extends AbstractIntegrationTest {
 					{"email":"never-logged-in@example.com","role":"MEMBER"}
 					"""))
 			.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void sharingConsentIsScopedToItsOwnLevel() throws Exception {
+		Consumer<Jwt.Builder> asOwner = userJwt("kc-org-owner-4", "Org Owner", "org-owner-4@example.com");
+		Consumer<Jwt.Builder> asCoach = userJwt("kc-org-coach-4", "Org Coach", "org-coach-4@example.com");
+		Consumer<Jwt.Builder> asMember = userJwt("kc-org-member-4", "Org Member", "org-member-4@example.com");
+
+		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOwner))).andExpect(status().isCreated());
+		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asCoach))).andExpect(status().isCreated());
+		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asMember))).andExpect(status().isCreated());
+
+		MvcResult orgResult = mockMvc.perform(post("/api/v1/organisations")
+				.with(jwt().jwt(asOwner))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"name":"Acme AB"}
+					"""))
+			.andReturn();
+		UUID accountId = UUID.fromString(readJson(orgResult).get("accountId").asText());
+
+		MvcResult groupResult = mockMvc.perform(post("/api/v1/organisations/" + accountId + "/groups")
+				.with(jwt().jwt(asOwner))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"name":"Backend team"}
+					"""))
+			.andReturn();
+		UUID groupId = UUID.fromString(readJson(groupResult).get("id").asText());
+
+		mockMvc.perform(post("/api/v1/organisations/" + accountId + "/members")
+				.with(jwt().jwt(asOwner))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"email":"org-coach-4@example.com","role":"COACH","groupId":"%s"}
+					""".formatted(groupId)))
+			.andExpect(status().isCreated());
+		mockMvc.perform(post("/api/v1/organisations/" + accountId + "/members")
+				.with(jwt().jwt(asOwner))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"email":"org-member-4@example.com","role":"MEMBER","groupId":"%s"}
+					""".formatted(groupId)))
+			.andExpect(status().isCreated());
+
+		// The member sets their own personal consent.
+		mockMvc.perform(patch("/api/v1/organisations/" + accountId + "/members/me/sharing")
+				.with(jwt().jwt(asMember))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"shareFlowWithPeers":true}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.shareFlowWithPeers").value(true));
+
+		// The group's own coach sets the group's consent.
+		mockMvc.perform(patch("/api/v1/organisations/" + accountId + "/groups/" + groupId + "/sharing")
+				.with(jwt().jwt(asCoach))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"shareFlowWithPeers":true}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.shareFlowWithPeers").value(true));
+
+		// A plain member (not this group's coach) can't set the group's consent.
+		mockMvc.perform(patch("/api/v1/organisations/" + accountId + "/groups/" + groupId + "/sharing")
+				.with(jwt().jwt(asMember))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"shareFlowWithPeers":false}
+					"""))
+			.andExpect(status().isForbidden());
 	}
 
 	private Consumer<Jwt.Builder> userJwt(String subject, String name, String email) {

@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -64,6 +65,29 @@ public class OrganisationController {
 	@GetMapping("/{accountId}/members")
 	public List<MemberResponse> members(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId) {
 		return organisationService.members(jwt, accountId);
+	}
+
+	/** The caller's own choice to share their personal Flow % with their group. */
+	@PatchMapping("/{accountId}/members/me/sharing")
+	public MemberResponse updateMemberSharing(
+			@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId, @Valid @RequestBody UpdateSharingRequest request) {
+		return organisationService.updateMemberSharing(jwt, accountId, request);
+	}
+
+	/** Only that group's own manager (a COACH scoped to it) can call this. */
+	@PatchMapping("/{accountId}/groups/{groupId}/sharing")
+	public GroupResponse updateGroupSharing(
+			@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId, @PathVariable UUID groupId,
+			@Valid @RequestBody UpdateSharingRequest request) {
+		return organisationService.updateGroupSharing(jwt, accountId, groupId, request);
+	}
+
+	/** Only that department's own manager (an ADMIN scoped to it) can call this. */
+	@PatchMapping("/{accountId}/departments/{departmentId}/sharing")
+	public DepartmentResponse updateDepartmentSharing(
+			@AuthenticationPrincipal Jwt jwt, @PathVariable UUID accountId, @PathVariable UUID departmentId,
+			@Valid @RequestBody UpdateSharingRequest request) {
+		return organisationService.updateDepartmentSharing(jwt, accountId, departmentId, request);
 	}
 
 }

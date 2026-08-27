@@ -16,10 +16,16 @@ import java.util.UUID;
  */
 public interface EventStatisticsRepository extends Repository<Event, UUID> {
 
+	// "In flow" — completed with ingoing+outgoing energy summing to 4-6 —
+	// is the same formula the old FlowKeeper apps used for "Flow %", recovered
+	// from oldflowkeeper/ResultHandler.java. Our 1-5 energy scale matches the
+	// old app's scale, so the band applies unchanged.
 	@Query("""
 		select new se.flowkeeper.api.statistics.OverallCounts(
 			count(e),
 			sum(case when e.status = se.flowkeeper.api.event.EventStatus.COMPLETED then 1L else 0L end),
+			sum(case when e.status = se.flowkeeper.api.event.EventStatus.COMPLETED
+				and (e.ingoingEnergy + e.outgoingEnergy) between 4 and 6 then 1L else 0L end),
 			avg(e.ingoingEnergy),
 			avg(e.outgoingEnergy - e.ingoingEnergy)
 		)
