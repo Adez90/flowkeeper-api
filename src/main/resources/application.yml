@@ -21,6 +21,13 @@ spring:
           # which flowkeeper-mobile will also be running locally.
           issuer-uri: ${OAUTH2_ISSUER_URI:http://localhost:8082/realms/flowkeeper}
 
+app:
+  cors:
+    # The web app's origin — a different subdomain in every real
+    # deployment, so the browser enforces CORS. Vite's default dev port
+    # locally.
+    allowed-origin: ${APP_ORIGIN:http://localhost:5173}
+
 server:
   port: 8080
 
