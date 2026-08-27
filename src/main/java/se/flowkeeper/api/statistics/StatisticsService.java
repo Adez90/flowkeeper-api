@@ -37,6 +37,14 @@ public class StatisticsService {
 	// a real organisation's size ever calls for it.
 	private static final int MIN_MEMBERS_FOR_AGGREGATE = 4;
 
+	// Anonymous by-type breakdown needs a much bigger crowd than a single
+	// rolled-up Flow % does: splitting activity by type re-introduces the
+	// same re-identification risk a small aggregate has, just one dimension
+	// over. Starting point per the confirmed design ("let's start with 10");
+	// flagged there as something to revisit once a larger real organisation
+	// actually exercises it.
+	private static final int MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS = 10;
+
 	private final EventStatisticsRepository eventStatisticsRepository;
 	private final AccountMemberRepository accountMemberRepository;
 	private final DepartmentRepository departmentRepository;
@@ -180,6 +188,50 @@ public class StatisticsService {
 			.toList();
 
 		return buildAggregateResponse(viewer, accountId, memberUserIds, period, referenceDate);
+	}
+
+	/**
+	 * The organisation OWNER's anonymous, by-event-type view across everyone
+	 * in the organisation — never one member's numbers on their own. Gated at
+	 * MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS, a higher bar than the plain
+	 * aggregate rollups: a type only one or two people ever log can still
+	 * point back to them even in an account otherwise big enough to be safe.
+	 */
+	@Transactional(readOnly = true)
+	public OrganisationTypeStatisticsResponse organisationTypeStatistics(
+			Jwt jwt, UUID accountId, StatisticsPeriod period, LocalDate referenceDate) {
+		User viewer = currentUserResolver.require(jwt);
+		AccountMember viewerMembership = requireMembership(accountId, viewer);
+
+		if (viewerMembership.getRole() != MemberRole.OWNER) {
+			throw new AccessDeniedException(
+				"User %s is not the OWNER of account %s".formatted(viewer.getId(), accountId));
+		}
+
+		List<UUID> memberUserIds = accountMemberRepository.findByAccount_Id(accountId).stream()
+			.map(member -> member.getUser().getId())
+			.toList();
+
+		ZoneId zone = resolveZone(viewer);
+		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(zone);
+		LocalDate rangeStart = period.startOf(date);
+		LocalDate rangeEnd = period.endOf(date);
+
+		int memberCount = memberUserIds.size();
+		if (memberCount < MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS) {
+			log.debug("Anonymous type stats for account {} have only {} member(s), below the minimum of {} — withholding",
+				accountId, memberCount, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS);
+			return new OrganisationTypeStatisticsResponse(period, rangeStart, rangeEnd, memberCount, true, List.of());
+		}
+
+		Instant start = rangeStart.atStartOfDay(zone).toInstant();
+		Instant end = rangeEnd.atStartOfDay(zone).toInstant();
+		List<TypeBreakdown> byType = eventStatisticsRepository.aggregateByTypeForUsers(accountId, memberUserIds, start, end)
+			.stream()
+			.map(TypeCounts::toBreakdown)
+			.toList();
+
+		return new OrganisationTypeStatisticsResponse(period, rangeStart, rangeEnd, memberCount, false, byType);
 	}
 
 	private AggregateStatisticsResponse buildAggregateResponse(

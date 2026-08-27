@@ -68,4 +68,25 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 		""")
 	List<TypeCounts> aggregateByType(@Param("accountId") UUID accountId, @Param("start") Instant start, @Param("end") Instant end);
 
+	// Same shape as aggregateByType, scoped to a set of users — how the
+	// organisation-wide anonymous by-type breakdown is computed (see
+	// StatisticsService#organisationTypeStatistics). "Anonymous" here means
+	// no single user's numbers are ever returned on their own — only counts
+	// grouped by event type across everyone in scope — which is also why
+	// this is gated at a much higher minimum-size threshold than the other
+	// aggregates: a type with only one or two events in it can still narrow
+	// down who logged it even when the account itself is large.
+	@Query("""
+		select new se.flowkeeper.api.statistics.TypeCounts(
+			et.id, et.label, count(e), avg(e.outgoingEnergy - e.ingoingEnergy)
+		)
+		from Event e join e.eventType et
+		where e.account.id = :accountId and e.user.id in :userIds and e.startedAt >= :start and e.startedAt < :end
+		group by et.id, et.label
+		order by count(e) desc
+		""")
+	List<TypeCounts> aggregateByTypeForUsers(
+		@Param("accountId") UUID accountId, @Param("userIds") Collection<UUID> userIds,
+		@Param("start") Instant start, @Param("end") Instant end);
+
 }

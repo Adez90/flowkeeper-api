@@ -203,6 +203,40 @@ class StatisticsServiceTest {
 	}
 
 	@Test
+	void organisationTypeStatisticsWithheldBelowTenMembers() {
+		UUID accountId = UUID.randomUUID();
+		AccountMember ownerMembership = new AccountMember(account, user, MemberRole.OWNER);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(ownerMembership));
+		// Only 3 members total — below MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS (10).
+		when(accountMemberRepository.findByAccount_Id(accountId)).thenReturn(List.of(
+			new AccountMember(account, user, MemberRole.OWNER),
+			new AccountMember(account, new User("kc-a", "A", "a@example.com"), MemberRole.MEMBER),
+			new AccountMember(account, new User("kc-b", "B", "b@example.com"), MemberRole.MEMBER)));
+
+		OrganisationTypeStatisticsResponse response = service().organisationTypeStatistics(
+			jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.belowMinimumSize()).isTrue();
+		assertThat(response.memberCount()).isEqualTo(3);
+		assertThat(response.byType()).isEmpty();
+	}
+
+	@Test
+	void organisationTypeStatisticsOnlyVisibleToOwner() {
+		UUID accountId = UUID.randomUUID();
+		Department department = new Department(account, "Engineering");
+		AccountMember adminMembership = new AccountMember(account, user, MemberRole.ADMIN, department, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(adminMembership));
+
+		assertThatThrownBy(() -> service().organisationTypeStatistics(jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
 	void rejectsNonMember() {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());

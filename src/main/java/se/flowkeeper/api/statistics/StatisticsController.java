@@ -64,4 +64,14 @@ public class StatisticsController {
 		return statisticsService.organisationStatistics(jwt, accountId, period, date);
 	}
 
+	/** Anonymous by-event-type breakdown across the whole organisation — the OWNER's view only. See OrganisationTypeStatisticsResponse. */
+	@GetMapping("/api/v1/statistics/organisation/by-type")
+	public OrganisationTypeStatisticsResponse organisationByType(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam StatisticsPeriod period,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+		return statisticsService.organisationTypeStatistics(jwt, accountId, period, date);
+	}
+
 }
