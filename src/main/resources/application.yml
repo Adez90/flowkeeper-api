@@ -53,6 +53,15 @@ app:
     # (flowkeeper-infra); a plain relative directory locally, created on
     # startup if missing.
     storage-dir: ${AVATAR_STORAGE_DIR:./data/avatars}
+  billing:
+    stripe:
+      # Both blank by default — no real billing until flowkeeper-infra's
+      # environment sets these. A blank secret-key makes checkout-session
+      # creation fail clearly (503) instead of calling Stripe with an
+      # empty key; a blank webhook-secret does the same for incoming
+      # webhook deliveries. See StripeGateway.
+      secret-key: ${STRIPE_SECRET_KEY:}
+      webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
 
 server:
   port: 8080

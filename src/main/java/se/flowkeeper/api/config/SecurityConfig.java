@@ -39,6 +39,9 @@ public class SecurityConfig {
 				// Avatar images are rendered in plain <img> tags on both
 				// clients, which can't attach an Authorization header.
 				.requestMatchers(HttpMethod.GET, "/api/v1/avatars/**").permitAll()
+				// Stripe has no bearer token — it authenticates itself via the
+				// Stripe-Signature header, verified inside StripeGateway.
+				.requestMatchers(HttpMethod.POST, "/api/v1/billing/webhook/stripe").permitAll()
 				.anyRequest().authenticated()
 			)
 			.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
