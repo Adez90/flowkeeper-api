@@ -5,7 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 
@@ -37,7 +36,6 @@ public class PaymentEvent {
 	@Column(name = "type", nullable = false, length = 100)
 	private String type;
 
-	@Lob
 	@Column(name = "payload", nullable = false)
 	private String payload;
 
