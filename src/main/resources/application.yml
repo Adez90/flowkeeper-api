@@ -68,6 +68,28 @@ app:
       # webhook deliveries. See StripeGateway.
       secret-key: ${STRIPE_SECRET_KEY:}
       webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  integrations:
+    # This API's own public base URL — distinct from app.cors.allowed-origin
+    # (the web app's origin). Providers redirect the browser back to
+    # {api-origin}/api/v1/integrations/oauth/{provider}/callback, which
+    # then redirects on to the web app itself.
+    api-origin: ${API_ORIGIN:http://localhost:8080}
+    google:
+      # Blank by default — Google Calendar stays unavailable
+      # (GET /api/v1/integrations/providers reports it as such) until both
+      # are set. See GoogleCalendarGateway.
+      client-id: ${GOOGLE_CALENDAR_CLIENT_ID:}
+      client-secret: ${GOOGLE_CALENDAR_CLIENT_SECRET:}
+    microsoft:
+      client-id: ${MICROSOFT_CALENDAR_CLIENT_ID:}
+      client-secret: ${MICROSOFT_CALENDAR_CLIENT_SECRET:}
+    strava:
+      client-id: ${STRAVA_CLIENT_ID:}
+      client-secret: ${STRAVA_CLIENT_SECRET:}
+    apple:
+      # No client id/secret to configure — Apple Calendar has no working
+      # gateway yet (see ExternalProvider), so this stays false regardless.
+      enabled: ${APPLE_CALENDAR_ENABLED:false}
 
 server:
   port: 8080

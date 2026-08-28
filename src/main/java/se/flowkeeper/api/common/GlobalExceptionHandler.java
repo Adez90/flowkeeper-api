@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import se.flowkeeper.api.billing.PaymentProviderNotConfiguredException;
+import se.flowkeeper.api.integrations.IntegrationProviderNotConfiguredException;
 
 /**
  * Maps the domain's own exceptions to a consistent JSON error body. Genuine
@@ -42,6 +43,13 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(PaymentProviderNotConfiguredException.class)
 	public ResponseEntity<ApiError> handlePaymentProviderNotConfigured(PaymentProviderNotConfiguredException ex) {
 		log.warn("Payment provider not usable: {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+			.body(ApiError.of(ex.getMessage(), HttpStatus.SERVICE_UNAVAILABLE.value()));
+	}
+
+	@ExceptionHandler(IntegrationProviderNotConfiguredException.class)
+	public ResponseEntity<ApiError> handleIntegrationProviderNotConfigured(IntegrationProviderNotConfiguredException ex) {
+		log.warn("Integration provider not usable: {}", ex.getMessage());
 		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
 			.body(ApiError.of(ex.getMessage(), HttpStatus.SERVICE_UNAVAILABLE.value()));
 	}

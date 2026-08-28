@@ -42,6 +42,10 @@ public class SecurityConfig {
 				// Stripe has no bearer token — it authenticates itself via the
 				// Stripe-Signature header, verified inside StripeGateway.
 				.requestMatchers(HttpMethod.POST, "/api/v1/billing/webhook/stripe").permitAll()
+				// The browser lands here straight from Google/Microsoft/Strava's
+				// own redirect, carrying no bearer token — the state param
+				// (see IntegrationsService) is what verifies it instead.
+				.requestMatchers(HttpMethod.GET, "/api/v1/integrations/oauth/*/callback").permitAll()
 				.anyRequest().authenticated()
 			)
 			.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
