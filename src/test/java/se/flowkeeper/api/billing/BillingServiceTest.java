@@ -326,7 +326,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.empty());
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.empty());
 
 		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), " abcd-1234 ")))
 			.isInstanceOf(ResourceNotFoundException.class);
@@ -339,7 +339,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 
 		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
 			.isInstanceOf(ConflictException.class);
@@ -351,7 +351,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 
 		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
 			.isInstanceOf(ConflictException.class);
@@ -364,7 +364,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 
 		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
 			.isInstanceOf(ConflictException.class);
@@ -376,7 +376,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(true);
 
 		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
@@ -389,7 +389,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(false);
 		when(subscriptionRepository.findByAccount_Id(account.getId())).thenReturn(Optional.empty());
 
@@ -419,7 +419,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(false);
 		when(subscriptionRepository.findByAccount_Id(account.getId())).thenReturn(Optional.of(existing));
 
@@ -438,7 +438,7 @@ class BillingServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRepository.findWithLockByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
 		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(false);
 		when(subscriptionRepository.findByAccount_Id(account.getId())).thenReturn(Optional.of(existing));
 

@@ -123,7 +123,10 @@ public class BillingService {
 		User user = currentUserResolver.require(jwt);
 		Account account = requireOwner(request.accountId(), user);
 
-		PromoCode promoCode = promoCodeRepository.findByCode(request.code().trim().toUpperCase())
+		// Locked for the rest of this transaction — see findWithLockByCode's
+		// own doc for why: without it, concurrent redemptions of a
+		// near-exhausted multi-use code can exceed maxRedemptions.
+		PromoCode promoCode = promoCodeRepository.findWithLockByCode(request.code().trim().toUpperCase())
 			.orElseThrow(() -> new ResourceNotFoundException("Unknown promo code"));
 
 		Instant now = Instant.now();
