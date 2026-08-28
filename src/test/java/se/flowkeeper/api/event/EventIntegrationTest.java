@@ -13,12 +13,14 @@ import org.springframework.test.web.servlet.MvcResult;
 import se.flowkeeper.api.AbstractIntegrationTest;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -158,6 +160,104 @@ class EventIntegrationTest extends AbstractIntegrationTest {
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(body))
 			.andExpect(status().isBadRequest());
+	}
+
+	/**
+	 * Own subject/account, same isolation reasoning as
+	 * logsAFullyHistoricalActivityAlreadyCompletedInOneCall above.
+	 */
+	@Test
+	void editCompletedEventPersistsEveryFieldAndShowsUpInTheCompletedList() throws Exception {
+		Consumer<Jwt.Builder> asEditUser = b -> b
+			.subject("kc-event-edit").claim("name", "Edit Tester").claim("email", "event-edit@example.com");
+		MvcResult registration = mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asEditUser))).andReturn();
+		UUID editAccountId = UUID.fromString(
+			objectMapper.readTree(registration.getResponse().getContentAsString()).get("personalAccountId").asText());
+
+		JsonNode types = objectMapper.readTree(mockMvc.perform(
+				get("/api/v1/event-types").param("accountId", editAccountId.toString()).with(jwt().jwt(asEditUser)))
+			.andReturn().getResponse().getContentAsString());
+		UUID originalTypeId = UUID.fromString(types.get(0).get("id").asText());
+		UUID correctedTypeId = UUID.fromString(types.get(1).get("id").asText());
+
+		Instant startedAt = Instant.now().minusSeconds(7200);
+		Instant completedAt = Instant.now().minusSeconds(3600);
+		String createBody = """
+			{"accountId":"%s","eventTypeId":"%s","ingoingEnergy":3,"ingoingNote":"felt rushed",
+			 "startedAt":"%s","outgoingEnergy":2,"outgoingNote":"drained","completedAt":"%s"}
+			""".formatted(editAccountId, originalTypeId, startedAt, completedAt);
+		MvcResult createResult = mockMvc.perform(post("/api/v1/events")
+				.with(jwt().jwt(asEditUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody))
+			.andExpect(status().isCreated())
+			.andReturn();
+		UUID eventId = UUID.fromString(
+			objectMapper.readTree(createResult.getResponse().getContentAsString()).get("id").asText());
+
+		Instant correctedStart = Instant.now().minusSeconds(5400);
+		Instant correctedEnd = Instant.now().minusSeconds(1800);
+		String editBody = """
+			{"eventTypeId":"%s","ingoingEnergy":5,"ingoingNote":"actually felt great",
+			 "startedAt":"%s","outgoingEnergy":4,"outgoingNote":"turned out well","completedAt":"%s"}
+			""".formatted(correctedTypeId, correctedStart, correctedEnd);
+		mockMvc.perform(patch("/api/v1/events/" + eventId)
+				.with(jwt().jwt(asEditUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(editBody))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.eventTypeId").value(correctedTypeId.toString()))
+			.andExpect(jsonPath("$.ingoingEnergy").value(5))
+			.andExpect(jsonPath("$.ingoingNote").value("actually felt great"))
+			.andExpect(jsonPath("$.outgoingEnergy").value(4))
+			.andExpect(jsonPath("$.outgoingNote").value("turned out well"));
+
+		String today = LocalDate.now().toString();
+		String tomorrow = LocalDate.now().plusDays(1).toString();
+		mockMvc.perform(get("/api/v1/events/completed")
+				.param("accountId", editAccountId.toString())
+				.param("rangeStart", today)
+				.param("rangeEndExclusive", tomorrow)
+				.with(jwt().jwt(asEditUser)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].id").value(eventId.toString()))
+			.andExpect(jsonPath("$[0].ingoingNote").value("actually felt great"));
+	}
+
+	@Test
+	void editRejectsAnEventThatIsStillOpen() throws Exception {
+		Consumer<Jwt.Builder> asOpenEditUser = b -> b
+			.subject("kc-event-openedit").claim("name", "Open Edit Tester").claim("email", "event-openedit@example.com");
+		MvcResult registration = mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOpenEditUser))).andReturn();
+		UUID openAccountId = UUID.fromString(
+			objectMapper.readTree(registration.getResponse().getContentAsString()).get("personalAccountId").asText());
+
+		JsonNode types = objectMapper.readTree(mockMvc.perform(
+				get("/api/v1/event-types").param("accountId", openAccountId.toString()).with(jwt().jwt(asOpenEditUser)))
+			.andReturn().getResponse().getContentAsString());
+		UUID eventTypeId = UUID.fromString(types.get(0).get("id").asText());
+
+		String createBody = """
+			{"accountId":"%s","eventTypeId":"%s","ingoingEnergy":3,"ingoingNote":null}
+			""".formatted(openAccountId, eventTypeId);
+		MvcResult createResult = mockMvc.perform(post("/api/v1/events")
+				.with(jwt().jwt(asOpenEditUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody))
+			.andExpect(status().isCreated())
+			.andReturn();
+		UUID eventId = UUID.fromString(
+			objectMapper.readTree(createResult.getResponse().getContentAsString()).get("id").asText());
+
+		Instant now = Instant.now();
+		String editBody = """
+			{"eventTypeId":"%s","ingoingEnergy":3,"ingoingNote":null,"startedAt":"%s","outgoingEnergy":4,"outgoingNote":null,"completedAt":"%s"}
+			""".formatted(eventTypeId, now, now);
+		mockMvc.perform(patch("/api/v1/events/" + eventId)
+				.with(jwt().jwt(asOpenEditUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(editBody))
+			.andExpect(status().isConflict());
 	}
 
 	@Test

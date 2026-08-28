@@ -14,8 +14,11 @@ import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
+import se.flowkeeper.api.user.UserTimezones;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,15 +31,18 @@ public class EventService {
 	private final EventTypeRepository eventTypeRepository;
 	private final AccountMemberRepository accountMemberRepository;
 	private final CurrentUserResolver currentUserResolver;
+	private final UserTimezones userTimezones;
 
 	public EventService(EventRepository eventRepository,
 			EventTypeRepository eventTypeRepository,
 			AccountMemberRepository accountMemberRepository,
-			CurrentUserResolver currentUserResolver) {
+			CurrentUserResolver currentUserResolver,
+			UserTimezones userTimezones) {
 		this.eventRepository = eventRepository;
 		this.eventTypeRepository = eventTypeRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.currentUserResolver = currentUserResolver;
+		this.userTimezones = userTimezones;
 	}
 
 	@Transactional
@@ -101,6 +107,66 @@ public class EventService {
 		log.info("User {} completed event {}", user.getId(), event.getId());
 
 		return EventResponse.from(event);
+	}
+
+	/**
+	 * Full correction of an already-completed event — the "I logged this
+	 * wrong" case. Requires the event to already be COMPLETED (an OPEN event
+	 * is finished via completeEvent instead) and, like completeEvent, only
+	 * the event's own owner may do it.
+	 */
+	@Transactional
+	public EventResponse editCompletedEvent(Jwt jwt, UUID eventId, UpdateEventRequest request) {
+		User user = currentUserResolver.require(jwt);
+		Event event = eventRepository.findById(eventId)
+			.orElseThrow(() -> new ResourceNotFoundException("No such event: " + eventId));
+
+		if (!event.getUser().equals(user)) {
+			throw new AccessDeniedException("Not your event");
+		}
+		if (event.getStatus() != EventStatus.COMPLETED) {
+			throw new ConflictException("Event %s is not completed yet".formatted(eventId));
+		}
+
+		EventType eventType = eventTypeRepository.findById(request.eventTypeId())
+			.orElseThrow(() -> new ResourceNotFoundException("Unknown event type: " + request.eventTypeId()));
+		if (eventType.getAccountId() != null && !eventType.getAccountId().equals(event.getAccount().getId())) {
+			throw new ResourceNotFoundException("Event type does not belong to this account: " + request.eventTypeId());
+		}
+
+		Instant now = Instant.now();
+		if (request.startedAt().isAfter(now)) {
+			throw new ValidationException("startedAt cannot be in the future");
+		}
+		if (request.completedAt().isAfter(now)) {
+			throw new ValidationException("completedAt cannot be in the future");
+		}
+		if (request.completedAt().isBefore(request.startedAt())) {
+			throw new ValidationException("completedAt cannot be before startedAt");
+		}
+
+		event.edit(eventType, request.ingoingEnergy(), request.ingoingNote(), request.startedAt(),
+			request.outgoingEnergy(), request.outgoingNote(), request.completedAt());
+
+		log.info("User {} edited completed event {}", user.getId(), event.getId());
+
+		return EventResponse.from(event);
+	}
+
+	/** The caller's own completed events in a date range (their own timezone) — backs the Completed list's edit screen. */
+	@Transactional(readOnly = true)
+	public List<EventResponse> listMyCompletedEvents(Jwt jwt, UUID accountId, LocalDate rangeStart, LocalDate rangeEndExclusive) {
+		User user = currentUserResolver.require(jwt);
+		requireMembership(accountId, user);
+
+		ZoneId zone = userTimezones.resolve(user);
+		Instant start = rangeStart.atStartOfDay(zone).toInstant();
+		Instant end = rangeEndExclusive.atStartOfDay(zone).toInstant();
+
+		List<Event> events = eventRepository.findByAccount_IdAndUser_IdAndStatusAndStartedAtBetweenOrderByStartedAtDesc(
+			accountId, user.getId(), EventStatus.COMPLETED, start, end);
+
+		return events.stream().map(EventResponse::from).toList();
 	}
 
 	/** Only the event's own owner can opt its notes in or out of anonymous organisation-wide feedback. */

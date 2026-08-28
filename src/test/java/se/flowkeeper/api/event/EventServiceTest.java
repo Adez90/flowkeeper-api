@@ -15,14 +15,18 @@ import se.flowkeeper.api.common.ConflictException;
 import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
+import se.flowkeeper.api.user.UserTimezones;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,7 +43,7 @@ class EventServiceTest {
 		.subject("kc-subject-1").issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).build();
 
 	private EventService service() {
-		return new EventService(eventRepository, eventTypeRepository, accountMemberRepository, currentUserResolver);
+		return new EventService(eventRepository, eventTypeRepository, accountMemberRepository, currentUserResolver, new UserTimezones());
 	}
 
 	@Test
@@ -204,6 +208,111 @@ class EventServiceTest {
 
 		assertThatThrownBy(() -> service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true)))
 			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void editCompletedEventUpdatesEveryField() {
+		EventType originalType = defaultEventType();
+		EventType newType = defaultEventType();
+		Event event = new Event(user, account, originalType, (short) 3, "old ingoing note");
+		event.complete((short) 2, "old outgoing note");
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(newType));
+
+		Instant start = Instant.now().minusSeconds(7200);
+		Instant end = Instant.now().minusSeconds(3600);
+		EventResponse response = service().editCompletedEvent(jwt, UUID.randomUUID(),
+			new UpdateEventRequest(UUID.randomUUID(), (short) 5, "corrected ingoing", start, (short) 4, "corrected outgoing", end));
+
+		assertThat(response.status()).isEqualTo("COMPLETED");
+		assertThat(response.ingoingEnergy()).isEqualTo((short) 5);
+		assertThat(response.ingoingNote()).isEqualTo("corrected ingoing");
+		assertThat(response.outgoingEnergy()).isEqualTo((short) 4);
+		assertThat(response.outgoingNote()).isEqualTo("corrected outgoing");
+		assertThat(response.startedAt()).isEqualTo(start);
+		assertThat(response.completedAt()).isEqualTo(end);
+	}
+
+	@Test
+	void editCompletedEventRejectsSomeoneElsesEvent() {
+		User someoneElse = new User("kc-subject-2", "Other Person", "other@example.com");
+		Event event = new Event(someoneElse, account, defaultEventType(), (short) 3, null);
+		event.complete((short) 4, "done");
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		Instant start = Instant.now().minusSeconds(7200);
+		Instant end = Instant.now().minusSeconds(3600);
+		assertThatThrownBy(() -> service().editCompletedEvent(jwt, UUID.randomUUID(),
+			new UpdateEventRequest(UUID.randomUUID(), (short) 3, null, start, (short) 4, null, end)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void editCompletedEventRejectsAnEventThatIsStillOpen() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		Instant start = Instant.now().minusSeconds(7200);
+		Instant end = Instant.now().minusSeconds(3600);
+		assertThatThrownBy(() -> service().editCompletedEvent(jwt, UUID.randomUUID(),
+			new UpdateEventRequest(UUID.randomUUID(), (short) 3, null, start, (short) 4, null, end)))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void editCompletedEventRejectsACompletedTimeBeforeTheStartTime() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+		event.complete((short) 4, "done");
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(defaultEventType()));
+
+		Instant start = Instant.now().minusSeconds(3600);
+		Instant end = Instant.now().minusSeconds(7200); // before start
+		assertThatThrownBy(() -> service().editCompletedEvent(jwt, UUID.randomUUID(),
+			new UpdateEventRequest(UUID.randomUUID(), (short) 3, null, start, (short) 4, null, end)))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
+	}
+
+	@Test
+	void editCompletedEventRejectsAStartTimeInTheFuture() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+		event.complete((short) 4, "done");
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+		when(eventTypeRepository.findById(any())).thenReturn(Optional.of(defaultEventType()));
+
+		Instant tomorrow = Instant.now().plusSeconds(86_400);
+		assertThatThrownBy(() -> service().editCompletedEvent(jwt, UUID.randomUUID(),
+			new UpdateEventRequest(UUID.randomUUID(), (short) 3, null, tomorrow, (short) 4, null, Instant.now())))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
+	}
+
+	@Test
+	void listMyCompletedEventsReturnsOnlyTheCallersOwnCompletedEventsInRange() {
+		UUID accountId = UUID.randomUUID();
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+		event.complete((short) 4, "done");
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(eventRepository.findByAccount_IdAndUser_IdAndStatusAndStartedAtBetweenOrderByStartedAtDesc(
+				any(), any(), eq(EventStatus.COMPLETED), any(), any()))
+			.thenReturn(List.of(event));
+
+		List<EventResponse> response = service().listMyCompletedEvents(jwt, accountId, LocalDate.now(), LocalDate.now().plusDays(1));
+
+		assertThat(response).hasSize(1);
+		assertThat(response.get(0).status()).isEqualTo("COMPLETED");
 	}
 
 	private EventType defaultEventType() {

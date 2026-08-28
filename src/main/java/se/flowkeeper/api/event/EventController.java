@@ -1,6 +1,7 @@
 package se.flowkeeper.api.event;
 
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,6 +41,22 @@ public class EventController {
 	@PatchMapping("/api/v1/events/{eventId}/sharing")
 	public EventResponse updateSharing(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID eventId, @Valid @RequestBody UpdateEventSharingRequest request) {
 		return eventService.updateSharing(jwt, eventId, request);
+	}
+
+	/** Full correction of an already-completed event — the "I logged this wrong" case. The event's own owner only. */
+	@PatchMapping("/api/v1/events/{eventId}")
+	public EventResponse edit(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID eventId, @Valid @RequestBody UpdateEventRequest request) {
+		return eventService.editCompletedEvent(jwt, eventId, request);
+	}
+
+	/** The caller's own completed events in a date range (their own timezone) — backs the Completed list's edit screen. */
+	@GetMapping("/api/v1/events/completed")
+	public List<EventResponse> listMyCompleted(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeStart,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate rangeEndExclusive) {
+		return eventService.listMyCompletedEvents(jwt, accountId, rangeStart, rangeEndExclusive);
 	}
 
 	/** The landing page's "ongoing events" list — status defaults to OPEN. */

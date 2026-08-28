@@ -110,6 +110,23 @@ public class Event {
 		this.shareAnonymously = shareAnonymously;
 	}
 
+	/**
+	 * Full correction of an already-completed event — the "I logged this
+	 * wrong" case. Every field is replaceable, including which activity type
+	 * it was; status stays COMPLETED (this never reopens an event, see
+	 * EventService.editCompletedEvent).
+	 */
+	public void edit(EventType eventType, short ingoingEnergy, String ingoingNote, Instant startedAt,
+			short outgoingEnergy, String outgoingNote, Instant completedAt) {
+		this.eventType = eventType;
+		this.ingoingEnergy = ingoingEnergy;
+		this.ingoingNote = ingoingNote;
+		this.startedAt = startedAt;
+		this.outgoingEnergy = outgoingEnergy;
+		this.outgoingNote = outgoingNote;
+		this.completedAt = completedAt;
+	}
+
 	@PrePersist
 	void onCreate() {
 		Instant now = Instant.now();
