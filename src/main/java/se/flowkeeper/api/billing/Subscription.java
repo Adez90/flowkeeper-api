@@ -35,11 +35,12 @@ public class Subscription {
 	@JoinColumn(name = "account_id", nullable = false, unique = true)
 	private Account account;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
-	@JoinColumn(name = "price_id", nullable = false)
+	/** Null for a promo-code-granted subscription — a trial isn't tied to any specific paid price. */
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "price_id")
 	private Price price;
 
-	/** Only meaningful when price.perSeat is true. */
+	/** Only meaningful when price != null and price.perSeat is true. Null on a promo grant means "not seat-limited". */
 	@Column(name = "seat_count")
 	private Integer seatCount;
 
@@ -73,6 +74,14 @@ public class Subscription {
 		this.price = price;
 		this.seatCount = seatCount;
 		this.status = status;
+	}
+
+	/** A promo-code-granted trial — no paid price, no provider ids, just an access window. */
+	public Subscription(Account account, SubscriptionStatus status, String provider, Instant currentPeriodEnd) {
+		this.account = account;
+		this.status = status;
+		this.provider = provider;
+		this.currentPeriodEnd = currentPeriodEnd;
 	}
 
 	@PrePersist
@@ -110,6 +119,12 @@ public class Subscription {
 		if (providerSubscriptionId != null) {
 			this.providerSubscriptionId = providerSubscriptionId;
 		}
+	}
+
+	/** Extends an already-existing subscription's access window via a promo code redemption, whatever its current provider. */
+	public void extendViaPromoGrant(Instant newPeriodEnd) {
+		this.status = SubscriptionStatus.ACTIVE;
+		this.currentPeriodEnd = newPeriodEnd;
 	}
 
 	public UUID getId() {

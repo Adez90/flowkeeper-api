@@ -12,6 +12,7 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.AccountRepository;
 import se.flowkeeper.api.account.MemberRole;
+import se.flowkeeper.api.common.ConflictException;
 import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
@@ -38,6 +39,8 @@ class BillingServiceTest {
 	@Mock PriceRepository priceRepository;
 	@Mock SubscriptionRepository subscriptionRepository;
 	@Mock PaymentEventRepository paymentEventRepository;
+	@Mock PromoCodeRepository promoCodeRepository;
+	@Mock PromoCodeRedemptionRepository promoCodeRedemptionRepository;
 	@Mock AccountRepository accountRepository;
 	@Mock AccountMemberRepository accountMemberRepository;
 	@Mock CurrentUserResolver currentUserResolver;
@@ -61,7 +64,8 @@ class BillingServiceTest {
 
 	private BillingService service() {
 		return new BillingService(planRepository, priceRepository, subscriptionRepository, paymentEventRepository,
-			accountRepository, accountMemberRepository, currentUserResolver, paymentGateway, "http://localhost:5173");
+			promoCodeRepository, promoCodeRedemptionRepository, accountRepository, accountMemberRepository,
+			currentUserResolver, paymentGateway, "http://localhost:5173");
 	}
 
 	private Plan plan(PlanScope scope, String code) {
@@ -305,6 +309,143 @@ class BillingServiceTest {
 
 		assertThat(existing.getCurrentPeriodEnd()).isEqualTo(newPeriodEnd);
 		verify(subscriptionRepository).save(existing);
+	}
+
+	@Test
+	void redeemPromoCodeRejectsANonOwner() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.MEMBER)));
+
+		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void redeemPromoCodeRejectsAnUnknownCode() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), " abcd-1234 ")))
+			.isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
+	void redeemPromoCodeRejectsARevokedCode() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 90, 1, null, null, "admin@flowkeeper.se");
+		promoCode.revoke();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+
+		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void redeemPromoCodeRejectsAnExpiredCode() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 90, 1, Instant.now().minusSeconds(60), null, "admin@flowkeeper.se");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+
+		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void redeemPromoCodeRejectsAnExhaustedCode() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 90, 1, null, null, "admin@flowkeeper.se");
+		promoCode.recordRedemption();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+
+		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void redeemPromoCodeRejectsADoubleRedemptionByTheSameAccount() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 90, 5, null, null, "admin@flowkeeper.se");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(true);
+
+		assertThatThrownBy(() -> service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234")))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void redeemPromoCodeGrantsANewSubscriptionWhenNoneExists() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 90, 1, null, null, "admin@flowkeeper.se");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(false);
+		when(subscriptionRepository.findByAccount_Id(account.getId())).thenReturn(Optional.empty());
+
+		SubscriptionResponse response = service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234"));
+
+		assertThat(response.status()).isEqualTo(SubscriptionStatus.ACTIVE);
+		assertThat(response.provider()).isEqualTo("PROMO_CODE");
+		assertThat(response.priceId()).isNull();
+		assertThat(response.currentPeriodEnd()).isAfter(Instant.now().plus(89, java.time.temporal.ChronoUnit.DAYS));
+
+		ArgumentCaptor<Subscription> captor = ArgumentCaptor.forClass(Subscription.class);
+		verify(subscriptionRepository).save(captor.capture());
+		assertThat(captor.getValue().getProvider()).isEqualTo("PROMO_CODE");
+		assertThat(promoCode.getRedemptionCount()).isEqualTo(1);
+		verify(promoCodeRepository).save(promoCode);
+		verify(promoCodeRedemptionRepository).save(any(PromoCodeRedemption.class));
+	}
+
+	@Test
+	void redeemPromoCodeExtendsAnExistingSubscriptionFromItsCurrentPeriodEnd() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 30, 1, null, null, "admin@flowkeeper.se");
+		Plan personal = plan(PlanScope.PERSONAL, "personal");
+		Price monthlyPrice = price(personal, BillingPeriod.ONE_MONTH, BillingType.RECURRING, false, 9900);
+		Instant farFuture = Instant.now().plus(60, java.time.temporal.ChronoUnit.DAYS);
+		Subscription existing = new Subscription(account, monthlyPrice, null, SubscriptionStatus.ACTIVE);
+		existing.applyProviderState(null, null, null, farFuture, "cus_1", "sub_1");
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(false);
+		when(subscriptionRepository.findByAccount_Id(account.getId())).thenReturn(Optional.of(existing));
+
+		SubscriptionResponse response = service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234"));
+
+		// Extends from the existing (still-in-the-future) period end, not from now.
+		assertThat(response.currentPeriodEnd()).isEqualTo(farFuture.plus(30, java.time.temporal.ChronoUnit.DAYS));
+	}
+
+	@Test
+	void redeemPromoCodeExtendsFromNowWhenTheExistingSubscriptionHasLapsed() {
+		PromoCode promoCode = new PromoCode("ABCD-1234", 30, 1, null, null, "admin@flowkeeper.se");
+		Plan personal = plan(PlanScope.PERSONAL, "personal");
+		Price monthlyPrice = price(personal, BillingPeriod.ONE_MONTH, BillingType.RECURRING, false, 9900);
+		Subscription existing = new Subscription(account, monthlyPrice, null, SubscriptionStatus.CANCELED);
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(promoCodeRepository.findByCode("ABCD-1234")).thenReturn(Optional.of(promoCode));
+		when(promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(any(), any())).thenReturn(false);
+		when(subscriptionRepository.findByAccount_Id(account.getId())).thenReturn(Optional.of(existing));
+
+		SubscriptionResponse response = service().redeemPromoCode(jwt, new RedeemPromoCodeRequest(account.getId(), "ABCD-1234"));
+
+		assertThat(response.status()).isEqualTo(SubscriptionStatus.ACTIVE);
+		assertThat(response.currentPeriodEnd()).isAfter(Instant.now().plus(29, java.time.temporal.ChronoUnit.DAYS));
 	}
 
 }

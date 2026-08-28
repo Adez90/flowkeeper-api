@@ -53,6 +53,12 @@ app:
     # (flowkeeper-infra); a plain relative directory locally, created on
     # startup if missing.
     storage-dir: ${AVATAR_STORAGE_DIR:./data/avatars}
+  admin:
+    # Comma-separated allowlist of FlowKeeper account emails allowed to
+    # use the platform-admin endpoints (currently: generating promo
+    # codes). Empty by default — nobody can until this is set. See
+    # PlatformAdmins.
+    emails: ${ADMIN_EMAILS:}
   billing:
     stripe:
       # Both blank by default — no real billing until flowkeeper-infra's

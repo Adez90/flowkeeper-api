@@ -39,4 +39,10 @@ public class BillingController {
 		return billingService.createCheckoutSession(jwt, request);
 	}
 
+	/** Redeems a trial/promo code for the account. Only the account's OWNER may call this. */
+	@PostMapping("/api/v1/billing/redeem-promo-code")
+	public SubscriptionResponse redeemPromoCode(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody RedeemPromoCodeRequest request) {
+		return billingService.redeemPromoCode(jwt, request);
+	}
+
 }

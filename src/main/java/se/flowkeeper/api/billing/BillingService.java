@@ -12,11 +12,14 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.AccountRepository;
 import se.flowkeeper.api.account.MemberRole;
+import se.flowkeeper.api.common.ConflictException;
 import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,11 +27,14 @@ import java.util.UUID;
 public class BillingService {
 
 	private static final Logger log = LoggerFactory.getLogger(BillingService.class);
+	private static final String PROMO_CODE_PROVIDER = "PROMO_CODE";
 
 	private final PlanRepository planRepository;
 	private final PriceRepository priceRepository;
 	private final SubscriptionRepository subscriptionRepository;
 	private final PaymentEventRepository paymentEventRepository;
+	private final PromoCodeRepository promoCodeRepository;
+	private final PromoCodeRedemptionRepository promoCodeRedemptionRepository;
 	private final AccountRepository accountRepository;
 	private final AccountMemberRepository accountMemberRepository;
 	private final CurrentUserResolver currentUserResolver;
@@ -39,6 +45,8 @@ public class BillingService {
 			PriceRepository priceRepository,
 			SubscriptionRepository subscriptionRepository,
 			PaymentEventRepository paymentEventRepository,
+			PromoCodeRepository promoCodeRepository,
+			PromoCodeRedemptionRepository promoCodeRedemptionRepository,
 			AccountRepository accountRepository,
 			AccountMemberRepository accountMemberRepository,
 			CurrentUserResolver currentUserResolver,
@@ -48,6 +56,8 @@ public class BillingService {
 		this.priceRepository = priceRepository;
 		this.subscriptionRepository = subscriptionRepository;
 		this.paymentEventRepository = paymentEventRepository;
+		this.promoCodeRepository = promoCodeRepository;
+		this.promoCodeRedemptionRepository = promoCodeRedemptionRepository;
 		this.accountRepository = accountRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.currentUserResolver = currentUserResolver;
@@ -101,6 +111,52 @@ public class BillingService {
 		log.info("User {} started a checkout for account {} price {}", user.getId(), account.getId(), price.getId());
 
 		return new CheckoutSessionResponse(checkoutUrl);
+	}
+
+	/**
+	 * Redeems a promo code for N days of access, granting a fresh
+	 * subscription or extending an existing one (whatever its provider).
+	 * Only the account's OWNER may redeem, same as starting a checkout.
+	 */
+	@Transactional
+	public SubscriptionResponse redeemPromoCode(Jwt jwt, RedeemPromoCodeRequest request) {
+		User user = currentUserResolver.require(jwt);
+		Account account = requireOwner(request.accountId(), user);
+
+		PromoCode promoCode = promoCodeRepository.findByCode(request.code().trim().toUpperCase())
+			.orElseThrow(() -> new ResourceNotFoundException("Unknown promo code"));
+
+		Instant now = Instant.now();
+		if (!promoCode.isRedeemable(now)) {
+			throw new ConflictException("This promo code can no longer be redeemed");
+		}
+		if (promoCodeRedemptionRepository.existsByPromoCode_IdAndAccount_Id(promoCode.getId(), account.getId())) {
+			throw new ConflictException("This account has already redeemed this promo code");
+		}
+
+		Subscription subscription = subscriptionRepository.findByAccount_Id(account.getId()).orElse(null);
+		if (subscription == null) {
+			subscription = new Subscription(account, SubscriptionStatus.ACTIVE, PROMO_CODE_PROVIDER,
+				now.plus(promoCode.getDurationDays(), ChronoUnit.DAYS));
+		} else {
+			// Extends from whichever is later — "now" for a lapsed/new grant, the
+			// existing period end for someone already mid-subscription — so
+			// redeeming never shortens time the account already has.
+			Instant base = subscription.getCurrentPeriodEnd() != null && subscription.getCurrentPeriodEnd().isAfter(now)
+				? subscription.getCurrentPeriodEnd()
+				: now;
+			subscription.extendViaPromoGrant(base.plus(promoCode.getDurationDays(), ChronoUnit.DAYS));
+		}
+		subscriptionRepository.save(subscription);
+
+		promoCode.recordRedemption();
+		promoCodeRepository.save(promoCode);
+		promoCodeRedemptionRepository.save(new PromoCodeRedemption(promoCode, account, user));
+
+		log.info("User {} redeemed promo code {} for account {} ({} day(s))",
+			user.getId(), promoCode.getCode(), account.getId(), promoCode.getDurationDays());
+
+		return SubscriptionResponse.from(subscription);
 	}
 
 	/**
