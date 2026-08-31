@@ -129,6 +129,44 @@ class OrganisationServiceTest {
 	}
 
 	@Test
+	void anAdminCannotAddAMemberAsOwner() {
+		User admin = userFixture("kc-admin");
+		Account org = orgFixture();
+		AccountMember adminMembership = new AccountMember(org, admin, MemberRole.ADMIN);
+
+		when(currentUserResolver.require(any())).thenReturn(admin);
+		when(accountRepository.findById(org.getId())).thenReturn(Optional.of(org));
+		when(accountMemberRepository.findByAccount_IdAndUser(org.getId(), admin)).thenReturn(Optional.of(adminMembership));
+
+		AddMemberRequest request = new AddMemberRequest("invitee@example.com", MemberRole.OWNER, null, null);
+
+		assertThatThrownBy(() -> service().addMember(jwt(), org.getId(), request))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void theOwnerCanAddAnotherOwner() {
+		User owner = userFixture("kc-owner");
+		User invitee = userFixture("kc-invitee");
+		Account org = orgFixture();
+		AccountMember ownerMembership = new AccountMember(org, owner, MemberRole.OWNER);
+
+		when(currentUserResolver.require(any())).thenReturn(owner);
+		when(accountRepository.findById(org.getId())).thenReturn(Optional.of(org));
+		when(accountMemberRepository.findByAccount_IdAndUser(org.getId(), owner)).thenReturn(Optional.of(ownerMembership));
+		when(userRepository.findByEmailIgnoreCase("invitee@example.com")).thenReturn(Optional.of(invitee));
+		when(accountMemberRepository.existsByAccount_IdAndUser(org.getId(), invitee)).thenReturn(false);
+		when(accountMemberRepository.save(any(AccountMember.class)))
+			.thenAnswer(invocation -> invocation.getArgument(0));
+
+		AddMemberRequest request = new AddMemberRequest("invitee@example.com", MemberRole.OWNER, null, null);
+
+		MemberResponse response = service().addMember(jwt(), org.getId(), request);
+
+		assertThat(response.role()).isEqualTo("OWNER");
+	}
+
+	@Test
 	void memberCanUpdateTheirOwnSharingPreference() {
 		User member = userFixture("kc-member");
 		Account org = orgFixture();

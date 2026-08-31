@@ -97,7 +97,15 @@ public class OrganisationService {
 	public MemberResponse addMember(Jwt jwt, UUID accountId, AddMemberRequest request) {
 		User actor = currentUserResolver.require(jwt);
 		Account account = requireOrganisation(accountId);
-		requireRole(accountId, actor, MANAGER_ROLES);
+		AccountMember actorMembership = requireRole(accountId, actor, MANAGER_ROLES);
+
+		// Otherwise a department-scoped ADMIN could add a member as OWNER —
+		// granting them full control of the organisation, above the actor's
+		// own authority. Only an existing OWNER may create another one.
+		if (request.role() == MemberRole.OWNER && actorMembership.getRole() != MemberRole.OWNER) {
+			throw new AccessDeniedException(
+				"User %s is not the OWNER of account %s and cannot add another OWNER".formatted(actor.getId(), accountId));
+		}
 
 		User invitee = userRepository.findByEmailIgnoreCase(request.email())
 			.orElseThrow(() -> new ResourceNotFoundException(
@@ -216,12 +224,13 @@ public class OrganisationService {
 				"User %s is not a member of account %s".formatted(user.getId(), accountId)));
 	}
 
-	private void requireRole(UUID accountId, User user, MemberRole... allowed) {
+	private AccountMember requireRole(UUID accountId, User user, MemberRole... allowed) {
 		AccountMember membership = requireMembership(accountId, user);
 		if (Arrays.stream(allowed).noneMatch(role -> role == membership.getRole())) {
 			throw new AccessDeniedException(
 				"User %s's role in account %s does not permit this action".formatted(user.getId(), accountId));
 		}
+		return membership;
 	}
 
 	private Department resolveDepartment(UUID accountId, UUID departmentId) {
