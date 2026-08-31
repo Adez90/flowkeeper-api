@@ -158,7 +158,7 @@ class EventServiceTest {
 		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
 
 		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(),
-			new CompleteEventRequest((short) 4, "done")))
+			new CompleteEventRequest((short) 4, "done", null)))
 			.isInstanceOf(AccessDeniedException.class);
 	}
 
@@ -171,7 +171,7 @@ class EventServiceTest {
 		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
 
 		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(),
-			new CompleteEventRequest((short) 4, "done again")))
+			new CompleteEventRequest((short) 4, "done again", null)))
 			.isInstanceOf(ConflictException.class);
 	}
 
@@ -181,8 +181,48 @@ class EventServiceTest {
 		when(eventRepository.findById(any())).thenReturn(Optional.empty());
 
 		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(),
-			new CompleteEventRequest((short) 4, null)))
+			new CompleteEventRequest((short) 4, null, null)))
 			.isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
+	void completeEventHonorsAnExplicitCompletedAt() {
+		Instant startedAt = Instant.now().minusSeconds(3600);
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null, startedAt);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		Instant knownEnd = Instant.now().minusSeconds(1800);
+		EventResponse response = service().completeEvent(jwt, UUID.randomUUID(),
+			new CompleteEventRequest((short) 4, "run finished", knownEnd));
+
+		assertThat(response.completedAt()).isEqualTo(knownEnd);
+	}
+
+	@Test
+	void completeEventRejectsACompletedAtBeforeTheStartTime() {
+		Instant startedAt = Instant.now().minusSeconds(1800);
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null, startedAt);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(),
+			new CompleteEventRequest((short) 4, null, startedAt.minusSeconds(60))))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
+	}
+
+	@Test
+	void completeEventRejectsACompletedAtInTheFuture() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(),
+			new CompleteEventRequest((short) 4, null, Instant.now().plusSeconds(3600))))
+			.isInstanceOf(se.flowkeeper.api.common.ValidationException.class);
 	}
 
 	@Test
@@ -322,7 +362,7 @@ class EventServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
 
-		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(), new CompleteEventRequest((short) 4, null)))
+		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(), new CompleteEventRequest((short) 4, null, null)))
 			.isInstanceOf(ConflictException.class);
 	}
 

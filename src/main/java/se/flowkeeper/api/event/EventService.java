@@ -105,7 +105,18 @@ public class EventService {
 			throw new ConflictException("Event %s hasn't been started yet — set an ingoing energy first".formatted(eventId));
 		}
 
-		event.complete(request.outgoingEnergy(), request.outgoingNote());
+		if (request.completedAt() != null) {
+			Instant now = Instant.now();
+			if (request.completedAt().isAfter(now)) {
+				throw new ValidationException("completedAt cannot be in the future");
+			}
+			if (request.completedAt().isBefore(event.getStartedAt())) {
+				throw new ValidationException("completedAt cannot be before startedAt");
+			}
+			event.complete(request.outgoingEnergy(), request.outgoingNote(), request.completedAt());
+		} else {
+			event.complete(request.outgoingEnergy(), request.outgoingNote());
+		}
 
 		log.info("User {} completed event {}", user.getId(), event.getId());
 
