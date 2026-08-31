@@ -1,6 +1,7 @@
 package se.flowkeeper.api.event;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import se.flowkeeper.api.integrations.ExternalProvider;
 
 import java.time.Instant;
 import java.util.List;
@@ -24,5 +25,8 @@ public interface EventRepository extends JpaRepository<Event, UUID> {
 
 	/** Has this user started any event in the given window — the unused-account reminder checks this against "today" in the user's own timezone. */
 	boolean existsByUser_IdAndStartedAtBetween(UUID userId, Instant start, Instant end);
+
+	/** Which of this provider's items this user has already imported — what the importable list filters out so nothing is offered twice. */
+	List<String> findExternalIdByUser_IdAndExternalProvider(UUID userId, ExternalProvider externalProvider);
 
 }

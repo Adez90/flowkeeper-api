@@ -315,6 +315,85 @@ class EventServiceTest {
 		assertThat(response.get(0).status()).isEqualTo("COMPLETED");
 	}
 
+	@Test
+	void completeEventRejectsAnEventThatHasNotBeenStartedYet() {
+		Event event = new Event(user, account, defaultEventType(), Instant.now(), Instant.now(), null, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().completeEvent(jwt, UUID.randomUUID(), new CompleteEventRequest((short) 4, null)))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void startEventSetsTheIngoingReadingOnAnImportedEvent() {
+		Event event = new Event(user, account, defaultEventType(), Instant.now(), Instant.now(), null, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		EventResponse response = service().startEvent(jwt, UUID.randomUUID(), new StartEventRequest((short) 3, "quick sync"));
+
+		assertThat(response.ingoingEnergy()).isEqualTo((short) 3);
+		assertThat(response.ingoingNote()).isEqualTo("quick sync");
+	}
+
+	@Test
+	void startEventRejectsSomeoneElsesEvent() {
+		User someoneElse = new User("kc-subject-2", "Other Person", "other@example.com");
+		Event event = new Event(someoneElse, account, defaultEventType(), Instant.now(), Instant.now(), null, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().startEvent(jwt, UUID.randomUUID(), new StartEventRequest((short) 3, null)))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void startEventRejectsAnEventThatAlreadyHasAnIngoingEnergy() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().startEvent(jwt, UUID.randomUUID(), new StartEventRequest((short) 4, null)))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void deleteEventRemovesTheCallersOwnEvent() {
+		Event event = new Event(user, account, defaultEventType(), (short) 3, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		service().deleteEvent(jwt, UUID.randomUUID());
+
+		org.mockito.Mockito.verify(eventRepository).delete(event);
+	}
+
+	@Test
+	void deleteEventRejectsSomeoneElsesEvent() {
+		User someoneElse = new User("kc-subject-2", "Other Person", "other@example.com");
+		Event event = new Event(someoneElse, account, defaultEventType(), (short) 3, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> service().deleteEvent(jwt, UUID.randomUUID())).isInstanceOf(AccessDeniedException.class);
+		org.mockito.Mockito.verify(eventRepository, org.mockito.Mockito.never()).delete(any());
+	}
+
+	@Test
+	void deleteEventUnknownIdIsNotFound() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(eventRepository.findById(any())).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service().deleteEvent(jwt, UUID.randomUUID())).isInstanceOf(ResourceNotFoundException.class);
+	}
+
 	private EventType defaultEventType() {
 		return org.mockito.Mockito.mock(EventType.class);
 	}

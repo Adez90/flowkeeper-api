@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import se.flowkeeper.api.account.Account;
@@ -12,10 +13,19 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.MemberRole;
 import se.flowkeeper.api.common.ResourceNotFoundException;
+import se.flowkeeper.api.common.ValidationException;
+import se.flowkeeper.api.event.Event;
+import se.flowkeeper.api.event.EventRepository;
+import se.flowkeeper.api.event.EventResponse;
+import se.flowkeeper.api.event.EventType;
+import se.flowkeeper.api.event.EventTypeRepository;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
+import se.flowkeeper.api.user.UserTimezones;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,9 +33,11 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,6 +48,9 @@ class IntegrationsServiceTest {
 	@Mock OAuthStateRepository oauthStateRepository;
 	@Mock AccountMemberRepository accountMemberRepository;
 	@Mock CurrentUserResolver currentUserResolver;
+	@Mock EventRepository eventRepository;
+	@Mock EventTypeRepository eventTypeRepository;
+	@Mock UserTimezones userTimezones;
 	@Mock OAuthCalendarGateway googleGateway;
 	@Mock OAuthCalendarGateway microsoftGateway;
 
@@ -72,8 +87,16 @@ class IntegrationsServiceTest {
 
 	private IntegrationsService service(boolean appleEnabled) {
 		return new IntegrationsService(connectionRepository, oauthStateRepository, accountMemberRepository,
-			currentUserResolver, List.of(googleGateway, microsoftGateway),
+			currentUserResolver, eventRepository, eventTypeRepository, userTimezones, List.of(googleGateway, microsoftGateway),
 			"http://localhost:8080", "http://localhost:5173", appleEnabled);
+	}
+
+	private static EventType mockEventType(UUID accountId) {
+		EventType eventType = mock(EventType.class);
+		lenient().when(eventType.getId()).thenReturn(UUID.randomUUID());
+		lenient().when(eventType.getAccountId()).thenReturn(accountId);
+		lenient().when(eventType.getLabel()).thenReturn("Physical activity");
+		return eventType;
 	}
 
 	@Test
@@ -282,6 +305,206 @@ class IntegrationsServiceTest {
 		service(false).disconnect(jwt, connectionId);
 
 		assertThat(connection.getStatus()).isEqualTo(ConnectionStatus.DISCONNECTED);
+	}
+
+	@Test
+	void listImportableItemsRejectsANonMember() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service(false).listImportableItems(jwt, account.getId(), null))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void listImportableItemsOnlyFetchesFromConnectedProviders() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		ExternalConnection connected = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		connected.applyTokens(new OAuthTokenResult("access", "refresh", Instant.now().plusSeconds(3600), "a@b.com"));
+		ExternalConnection disconnected = new ExternalConnection(user, account, ExternalProvider.MICROSOFT_CALENDAR);
+		disconnected.disconnect();
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId()))
+			.thenReturn(List.of(connected, disconnected));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(any(), any())).thenReturn(List.of());
+		when(googleGateway.fetchDayItems(eq("access"), any(), any())).thenReturn(List.of());
+
+		List<ImportableGroupResponse> groups = service(false).listImportableItems(jwt, account.getId(), null);
+
+		assertThat(groups).hasSize(1);
+		assertThat(groups.get(0).provider()).isEqualTo(ExternalProvider.GOOGLE_CALENDAR);
+		verify(microsoftGateway, never()).fetchDayItems(any(), any(), any());
+	}
+
+	@Test
+	void listImportableItemsFiltersOutAlreadyImportedIds() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		ExternalConnection connection = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		connection.applyTokens(new OAuthTokenResult("access", "refresh", Instant.now().plusSeconds(3600), "a@b.com"));
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId())).thenReturn(List.of(connection));
+
+		ImportableItem alreadyImported = new ImportableItem("ext-1", "Standup", Instant.now(), Instant.now().plusSeconds(1800));
+		ImportableItem fresh = new ImportableItem("ext-2", "Run", Instant.now(), Instant.now().plusSeconds(1800));
+		when(googleGateway.fetchDayItems(eq("access"), any(), any())).thenReturn(List.of(alreadyImported, fresh));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(user.getId(), ExternalProvider.GOOGLE_CALENDAR))
+			.thenReturn(List.of("ext-1"));
+
+		List<ImportableGroupResponse> groups = service(false).listImportableItems(jwt, account.getId(), null);
+
+		assertThat(groups.get(0).items()).extracting(ImportableItem::externalId).containsExactly("ext-2");
+	}
+
+	@Test
+	void listImportableItemsRefreshesAnExpiredToken() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		ExternalConnection connection = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		connection.applyTokens(new OAuthTokenResult("stale-access", "refresh", Instant.now().minusSeconds(60), "a@b.com"));
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId())).thenReturn(List.of(connection));
+		when(googleGateway.refreshAccessToken("refresh"))
+			.thenReturn(new OAuthTokenResult("fresh-access", null, Instant.now().plusSeconds(3600), null));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(any(), any())).thenReturn(List.of());
+		when(googleGateway.fetchDayItems(eq("fresh-access"), any(), any())).thenReturn(List.of());
+
+		service(false).listImportableItems(jwt, account.getId(), null);
+
+		assertThat(connection.getAccessToken()).isEqualTo("fresh-access");
+		verify(connectionRepository).save(connection);
+	}
+
+	@Test
+	void listImportableItemsSkipsRefreshingAStillValidToken() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		ExternalConnection connection = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		connection.applyTokens(new OAuthTokenResult("access", "refresh", Instant.now().plusSeconds(3600), "a@b.com"));
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId())).thenReturn(List.of(connection));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(any(), any())).thenReturn(List.of());
+		when(googleGateway.fetchDayItems(eq("access"), any(), any())).thenReturn(List.of());
+
+		service(false).listImportableItems(jwt, account.getId(), null);
+
+		verify(googleGateway, never()).refreshAccessToken(any());
+	}
+
+	@Test
+	void listImportableItemsMarksNeedsReconnectWhenAProviderFailsWithoutBreakingOthers() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		ExternalConnection google = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		google.applyTokens(new OAuthTokenResult("access", "refresh", Instant.now().minusSeconds(60), "a@b.com"));
+		ExternalConnection microsoft = new ExternalConnection(user, account, ExternalProvider.MICROSOFT_CALENDAR);
+		microsoft.applyTokens(new OAuthTokenResult("ms-access", "ms-refresh", Instant.now().plusSeconds(3600), "b@c.com"));
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId())).thenReturn(List.of(google, microsoft));
+		when(googleGateway.refreshAccessToken("refresh")).thenThrow(new RuntimeException("revoked"));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(any(), any())).thenReturn(List.of());
+		when(microsoftGateway.fetchDayItems(eq("ms-access"), any(), any())).thenReturn(List.of());
+
+		List<ImportableGroupResponse> groups = service(false).listImportableItems(jwt, account.getId(), null);
+
+		assertThat(groups).hasSize(2);
+		assertThat(groups).filteredOn(g -> g.provider() == ExternalProvider.GOOGLE_CALENDAR)
+			.singleElement().satisfies(g -> {
+				assertThat(g.needsReconnect()).isTrue();
+				assertThat(g.items()).isEmpty();
+			});
+		assertThat(groups).filteredOn(g -> g.provider() == ExternalProvider.MICROSOFT_CALENDAR)
+			.singleElement().satisfies(g -> assertThat(g.needsReconnect()).isFalse());
+	}
+
+	@Test
+	void importEventsRejectsANonMember() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());
+		ImportEventsRequest request = new ImportEventsRequest(account.getId(),
+			List.of(new ImportSelectionRequest(ExternalProvider.STRAVA, "ext-1", UUID.randomUUID(), Instant.now(), Instant.now())));
+
+		assertThatThrownBy(() -> service(false).importEvents(jwt, request)).isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void importEventsCreatesAnOpenEventWithNoIngoingEnergyYet() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		EventType eventType = mockEventType(null);
+		when(eventTypeRepository.findById(eventType.getId())).thenReturn(Optional.of(eventType));
+		when(eventRepository.saveAndFlush(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
+
+		Instant startedAt = Instant.now().minusSeconds(1800);
+		Instant endedAt = Instant.now();
+		ImportEventsRequest request = new ImportEventsRequest(account.getId(),
+			List.of(new ImportSelectionRequest(ExternalProvider.STRAVA, "ext-1", eventType.getId(), startedAt, endedAt)));
+
+		List<EventResponse> created = service(false).importEvents(jwt, request);
+
+		assertThat(created).hasSize(1);
+		assertThat(created.get(0).ingoingEnergy()).isNull();
+		assertThat(created.get(0).status()).isEqualTo("OPEN");
+		assertThat(created.get(0).externalProvider()).isEqualTo(ExternalProvider.STRAVA);
+		assertThat(created.get(0).externalEndedAt()).isEqualTo(endedAt);
+	}
+
+	@Test
+	void importEventsRejectsAnEventTypeFromAnotherAccount() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		EventType otherAccountsType = mockEventType(UUID.randomUUID());
+		when(eventTypeRepository.findById(otherAccountsType.getId())).thenReturn(Optional.of(otherAccountsType));
+		ImportEventsRequest request = new ImportEventsRequest(account.getId(),
+			List.of(new ImportSelectionRequest(ExternalProvider.STRAVA, "ext-1", otherAccountsType.getId(), Instant.now(), Instant.now())));
+
+		assertThatThrownBy(() -> service(false).importEvents(jwt, request)).isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
+	void importEventsRejectsAFutureStartedAt() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		ImportEventsRequest request = new ImportEventsRequest(account.getId(),
+			List.of(new ImportSelectionRequest(ExternalProvider.STRAVA, "ext-1", UUID.randomUUID(),
+				Instant.now().plusSeconds(3600), Instant.now().plusSeconds(7200))));
+
+		assertThatThrownBy(() -> service(false).importEvents(jwt, request)).isInstanceOf(ValidationException.class);
+	}
+
+	@Test
+	void importEventsSkipsAnItemAlreadyImportedRatherThanFailingTheWholeBatch() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		EventType eventType = mockEventType(null);
+		when(eventTypeRepository.findById(eventType.getId())).thenReturn(Optional.of(eventType));
+		when(eventRepository.saveAndFlush(any(Event.class)))
+			.thenThrow(new DataIntegrityViolationException("duplicate"))
+			.thenAnswer(inv -> inv.getArgument(0));
+
+		ImportEventsRequest request = new ImportEventsRequest(account.getId(), List.of(
+			new ImportSelectionRequest(ExternalProvider.STRAVA, "ext-1", eventType.getId(), Instant.now(), Instant.now()),
+			new ImportSelectionRequest(ExternalProvider.STRAVA, "ext-2", eventType.getId(), Instant.now(), Instant.now())));
+
+		List<EventResponse> created = service(false).importEvents(jwt, request);
+
+		assertThat(created).hasSize(1);
+		verify(eventRepository, times(2)).saveAndFlush(any(Event.class));
 	}
 
 }

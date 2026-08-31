@@ -107,6 +107,23 @@ public class ExternalConnection {
 		this.lastError = null;
 	}
 
+	/**
+	 * Same as {@link #applyTokens}, but for a token refresh rather than a
+	 * fresh authorization: the label is left as-is (refresh responses don't
+	 * carry one), and the refresh token itself is only replaced when the
+	 * provider actually issued a new one — Google reuses the original
+	 * indefinitely, Strava and Microsoft rotate it on every refresh.
+	 */
+	public void applyRefreshedTokens(OAuthTokenResult tokens) {
+		this.status = ConnectionStatus.CONNECTED;
+		this.accessToken = tokens.accessToken();
+		if (tokens.refreshToken() != null) {
+			this.refreshToken = tokens.refreshToken();
+		}
+		this.tokenExpiresAt = tokens.expiresAt();
+		this.lastError = null;
+	}
+
 	public void markError(String message) {
 		this.status = ConnectionStatus.ERROR;
 		this.lastError = message;

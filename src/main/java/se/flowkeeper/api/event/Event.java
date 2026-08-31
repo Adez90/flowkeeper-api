@@ -14,6 +14,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import se.flowkeeper.api.account.Account;
+import se.flowkeeper.api.integrations.ExternalProvider;
 import se.flowkeeper.api.user.User;
 
 import java.time.Instant;
@@ -48,8 +49,9 @@ public class Event {
 	@Column(name = "status", nullable = false, length = 20)
 	private EventStatus status;
 
-	@Column(name = "ingoing_energy", nullable = false)
-	private short ingoingEnergy;
+	/** Null only for an imported event nobody has "started" yet — see {@link #start}. Every manually-logged event sets this at creation. */
+	@Column(name = "ingoing_energy")
+	private Short ingoingEnergy;
 
 	@Column(name = "ingoing_note")
 	private String ingoingNote;
@@ -68,6 +70,18 @@ public class Event {
 
 	@Column(name = "completed_at")
 	private Instant completedAt;
+
+	/** Set only for an event brought in from a connected provider — see {@link #importedFrom}. */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "external_provider", length = 30)
+	private ExternalProvider externalProvider;
+
+	@Column(name = "external_id")
+	private String externalId;
+
+	/** The provider's own end time, offered as the default when finalizing — never applied automatically. */
+	@Column(name = "external_ended_at")
+	private Instant externalEndedAt;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
@@ -93,12 +107,37 @@ public class Event {
 		this.startedAt = startedAt;
 	}
 
+	/** An event brought in from a connected provider — no ingoing energy yet; see {@link #start}. */
+	public Event(User user, Account account, EventType eventType, Instant startedAt, Instant externalEndedAt,
+			ExternalProvider externalProvider, String externalId) {
+		this.user = user;
+		this.account = account;
+		this.eventType = eventType;
+		this.status = EventStatus.OPEN;
+		this.startedAt = startedAt;
+		this.externalEndedAt = externalEndedAt;
+		this.externalProvider = externalProvider;
+		this.externalId = externalId;
+	}
+
+	/** The first time an imported event is actually acted on — sets the ingoing reading a manually-created event already has from the start. */
+	public void start(short ingoingEnergy, String ingoingNote) {
+		if (this.ingoingEnergy != null) {
+			throw new IllegalStateException("Event %s already has an ingoing energy set".formatted(id));
+		}
+		this.ingoingEnergy = ingoingEnergy;
+		this.ingoingNote = ingoingNote;
+	}
+
 	public void complete(short outgoingEnergy, String outgoingNote) {
 		complete(outgoingEnergy, outgoingNote, Instant.now());
 	}
 
 	/** Same as the 2-arg overload, but with an explicit completedAt — how a historical activity is marked done at the same time it's logged. */
 	public void complete(short outgoingEnergy, String outgoingNote, Instant completedAt) {
+		if (this.ingoingEnergy == null) {
+			throw new IllegalStateException("Event %s hasn't been started yet — set an ingoing energy first".formatted(id));
+		}
 		this.outgoingEnergy = outgoingEnergy;
 		this.outgoingNote = outgoingNote;
 		this.completedAt = completedAt;
@@ -161,7 +200,7 @@ public class Event {
 		return status;
 	}
 
-	public short getIngoingEnergy() {
+	public Short getIngoingEnergy() {
 		return ingoingEnergy;
 	}
 
@@ -187,6 +226,18 @@ public class Event {
 
 	public Instant getCompletedAt() {
 		return completedAt;
+	}
+
+	public ExternalProvider getExternalProvider() {
+		return externalProvider;
+	}
+
+	public String getExternalId() {
+		return externalId;
+	}
+
+	public Instant getExternalEndedAt() {
+		return externalEndedAt;
 	}
 
 }

@@ -1,6 +1,7 @@
 package se.flowkeeper.api.integrations;
 
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -12,7 +13,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import se.flowkeeper.api.event.EventResponse;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,6 +50,20 @@ public class IntegrationsController {
 	public ResponseEntity<Void> disconnect(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID connectionId) {
 		integrationsService.disconnect(jwt, connectionId);
 		return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+	}
+
+	/** What's importable from every connected provider for one day (defaults to today, in the caller's own timezone) — grouped by provider, already-imported items excluded. */
+	@GetMapping("/api/v1/integrations/importable")
+	public List<ImportableGroupResponse> listImportable(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+		return integrationsService.listImportableItems(jwt, accountId, date);
+	}
+
+	@PostMapping("/api/v1/integrations/import")
+	public List<EventResponse> importEvents(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ImportEventsRequest request) {
+		return integrationsService.importEvents(jwt, request);
 	}
 
 }

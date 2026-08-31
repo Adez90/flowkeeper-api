@@ -101,12 +101,56 @@ public class EventService {
 		if (event.getStatus() == EventStatus.COMPLETED) {
 			throw new ConflictException("Event %s is already completed".formatted(eventId));
 		}
+		if (event.getIngoingEnergy() == null) {
+			throw new ConflictException("Event %s hasn't been started yet — set an ingoing energy first".formatted(eventId));
+		}
 
 		event.complete(request.outgoingEnergy(), request.outgoingNote());
 
 		log.info("User {} completed event {}", user.getId(), event.getId());
 
 		return EventResponse.from(event);
+	}
+
+	/**
+	 * The first real interaction with an imported event — sets the ingoing
+	 * reading a manually-created event already has from the moment it's
+	 * logged. Only valid once, on an event that doesn't have one yet.
+	 */
+	@Transactional
+	public EventResponse startEvent(Jwt jwt, UUID eventId, StartEventRequest request) {
+		User user = currentUserResolver.require(jwt);
+		Event event = eventRepository.findById(eventId)
+			.orElseThrow(() -> new ResourceNotFoundException("No such event: " + eventId));
+
+		if (!event.getUser().equals(user)) {
+			throw new AccessDeniedException("Not your event");
+		}
+		if (event.getIngoingEnergy() != null) {
+			throw new ConflictException("Event %s already has an ingoing energy set".formatted(eventId));
+		}
+
+		event.start(request.ingoingEnergy(), request.ingoingNote());
+
+		log.info("User {} started imported event {}", user.getId(), event.getId());
+
+		return EventResponse.from(event);
+	}
+
+	/** Removes a logged event outright — the "I don't want this one at all" case, distinct from editing it. The event's own owner only. */
+	@Transactional
+	public void deleteEvent(Jwt jwt, UUID eventId) {
+		User user = currentUserResolver.require(jwt);
+		Event event = eventRepository.findById(eventId)
+			.orElseThrow(() -> new ResourceNotFoundException("No such event: " + eventId));
+
+		if (!event.getUser().equals(user)) {
+			throw new AccessDeniedException("Not your event");
+		}
+
+		eventRepository.delete(event);
+
+		log.info("User {} deleted event {}", user.getId(), eventId);
 	}
 
 	/**

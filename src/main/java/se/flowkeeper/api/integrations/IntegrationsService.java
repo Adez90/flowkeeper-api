@@ -3,6 +3,7 @@ package se.flowkeeper.api.integrations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -11,16 +12,27 @@ import se.flowkeeper.api.account.Account;
 import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.common.ResourceNotFoundException;
+import se.flowkeeper.api.common.ValidationException;
+import se.flowkeeper.api.event.Event;
+import se.flowkeeper.api.event.EventRepository;
+import se.flowkeeper.api.event.EventResponse;
+import se.flowkeeper.api.event.EventType;
+import se.flowkeeper.api.event.EventTypeRepository;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
+import se.flowkeeper.api.user.UserTimezones;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -35,6 +47,9 @@ public class IntegrationsService {
 	private final OAuthStateRepository oauthStateRepository;
 	private final AccountMemberRepository accountMemberRepository;
 	private final CurrentUserResolver currentUserResolver;
+	private final EventRepository eventRepository;
+	private final EventTypeRepository eventTypeRepository;
+	private final UserTimezones userTimezones;
 	private final Map<ExternalProvider, OAuthCalendarGateway> gatewaysByProvider;
 	private final String apiOrigin;
 	private final String appOrigin;
@@ -44,6 +59,9 @@ public class IntegrationsService {
 			OAuthStateRepository oauthStateRepository,
 			AccountMemberRepository accountMemberRepository,
 			CurrentUserResolver currentUserResolver,
+			EventRepository eventRepository,
+			EventTypeRepository eventTypeRepository,
+			UserTimezones userTimezones,
 			List<OAuthCalendarGateway> gateways,
 			@Value("${app.integrations.api-origin}") String apiOrigin,
 			@Value("${app.cors.allowed-origin}") String appOrigin,
@@ -52,6 +70,9 @@ public class IntegrationsService {
 		this.oauthStateRepository = oauthStateRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.currentUserResolver = currentUserResolver;
+		this.eventRepository = eventRepository;
+		this.eventTypeRepository = eventTypeRepository;
+		this.userTimezones = userTimezones;
 		this.gatewaysByProvider = gateways.stream().collect(Collectors.toMap(OAuthCalendarGateway::provider, Function.identity()));
 		this.apiOrigin = apiOrigin;
 		this.appOrigin = appOrigin;
@@ -161,6 +182,99 @@ public class IntegrationsService {
 
 		connection.disconnect();
 		log.info("User {} disconnected {} ({})", user.getId(), connection.getProvider(), connectionId);
+	}
+
+	/**
+	 * Everything the caller's connected providers report for one day,
+	 * minus whatever's already been imported. Safe to call repeatedly
+	 * through the day — pressing "Import events" again only ever surfaces
+	 * what's new since the last check.
+	 */
+	@Transactional
+	public List<ImportableGroupResponse> listImportableItems(Jwt jwt, UUID accountId, LocalDate date) {
+		User user = currentUserResolver.require(jwt);
+		requireMembership(accountId, user);
+		ZoneId zone = userTimezones.resolve(user);
+		LocalDate day = date != null ? date : LocalDate.now(zone);
+
+		List<ExternalConnection> connections = connectionRepository.findByUser_IdAndAccount_Id(user.getId(), accountId).stream()
+			.filter(c -> c.getStatus() == ConnectionStatus.CONNECTED)
+			.toList();
+
+		List<ImportableGroupResponse> groups = new ArrayList<>();
+		for (ExternalConnection connection : connections) {
+			OAuthCalendarGateway gateway = gatewaysByProvider.get(connection.getProvider());
+			if (gateway == null) {
+				continue;
+			}
+			groups.add(fetchGroup(connection, gateway, user, day, zone));
+		}
+		return groups;
+	}
+
+	private ImportableGroupResponse fetchGroup(ExternalConnection connection, OAuthCalendarGateway gateway, User user, LocalDate day, ZoneId zone) {
+		try {
+			String accessToken = ensureFreshToken(connection, gateway);
+			List<ImportableItem> items = gateway.fetchDayItems(accessToken, day, zone);
+
+			Set<String> alreadyImported = new HashSet<>(
+				eventRepository.findExternalIdByUser_IdAndExternalProvider(user.getId(), connection.getProvider()));
+			List<ImportableItem> unseen = items.stream().filter(item -> !alreadyImported.contains(item.externalId())).toList();
+
+			return new ImportableGroupResponse(connection.getProvider(), false, unseen);
+		} catch (Exception e) {
+			// A single provider failing (revoked access, an expired refresh
+			// token, a transient outage) shouldn't take the whole request
+			// down — the other connected providers still return normally.
+			log.warn("Couldn't fetch importable items from {} for user {}: {}", connection.getProvider(), user.getId(), e.getMessage());
+			connection.markError(e.getMessage());
+			return new ImportableGroupResponse(connection.getProvider(), true, List.of());
+		}
+	}
+
+	private String ensureFreshToken(ExternalConnection connection, OAuthCalendarGateway gateway) {
+		Instant expiresAt = connection.getTokenExpiresAt();
+		if (expiresAt == null || expiresAt.isBefore(Instant.now().plus(2, ChronoUnit.MINUTES))) {
+			OAuthTokenResult refreshed = gateway.refreshAccessToken(connection.getRefreshToken());
+			connection.applyRefreshedTokens(refreshed);
+			connectionRepository.save(connection);
+		}
+		return connection.getAccessToken();
+	}
+
+	/** Turns a set of previously-listed importable items into real, open events — each starts with no ingoing energy yet, see Event#start. */
+	@Transactional
+	public List<EventResponse> importEvents(Jwt jwt, ImportEventsRequest request) {
+		User user = currentUserResolver.require(jwt);
+		Account account = requireMembership(request.accountId(), user);
+		Instant now = Instant.now();
+
+		List<EventResponse> created = new ArrayList<>();
+		for (ImportSelectionRequest selection : request.selections()) {
+			if (selection.startedAt().isAfter(now)) {
+				throw new ValidationException("startedAt cannot be in the future");
+			}
+			EventType eventType = eventTypeRepository.findById(selection.eventTypeId())
+				.orElseThrow(() -> new ResourceNotFoundException("Unknown event type: " + selection.eventTypeId()));
+			if (eventType.getAccountId() != null && !eventType.getAccountId().equals(account.getId())) {
+				throw new ResourceNotFoundException("Event type does not belong to this account: " + selection.eventTypeId());
+			}
+
+			Event event = new Event(user, account, eventType, selection.startedAt(), selection.endedAt(),
+				selection.provider(), selection.externalId());
+			try {
+				event = eventRepository.saveAndFlush(event);
+			} catch (DataIntegrityViolationException e) {
+				// Already imported — a second "Import events" press racing
+				// this one, or the same item selected twice in one batch.
+				// Skip it rather than failing the whole request.
+				continue;
+			}
+			created.add(EventResponse.from(event));
+		}
+
+		log.info("User {} imported {} event(s) into account {}", user.getId(), created.size(), account.getId());
+		return created;
 	}
 
 	private Account requireMembership(UUID accountId, User user) {
