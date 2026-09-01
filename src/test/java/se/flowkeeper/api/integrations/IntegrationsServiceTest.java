@@ -429,6 +429,48 @@ class IntegrationsServiceTest {
 	}
 
 	@Test
+	void listImportableItemsRetriesAConnectionThatPreviouslyErrored() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		// A prior failed attempt left this ERROR — it must still be tried again, not
+		// silently dropped forever, since whatever failed before may now be fine.
+		ExternalConnection connection = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		connection.applyTokens(new OAuthTokenResult("access", "refresh", Instant.now().plusSeconds(3600), "a@b.com"));
+		connection.markError("revoked");
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId())).thenReturn(List.of(connection));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(any(), any())).thenReturn(List.of());
+		when(googleGateway.fetchDayItems(eq("access"), any(), any())).thenReturn(List.of());
+
+		List<ImportableGroupResponse> groups = service(false).listImportableItems(jwt, account.getId(), null);
+
+		assertThat(groups).hasSize(1);
+		assertThat(groups.get(0).needsReconnect()).isFalse();
+	}
+
+	@Test
+	void listImportableItemsClearsErrorStatusOnceAConnectionRecovers() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
+		when(userTimezones.resolve(user)).thenReturn(ZoneOffset.UTC);
+
+		ExternalConnection connection = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
+		connection.applyTokens(new OAuthTokenResult("access", "refresh", Instant.now().plusSeconds(3600), "a@b.com"));
+		connection.markError("revoked");
+		when(connectionRepository.findByUser_IdAndAccount_Id(user.getId(), account.getId())).thenReturn(List.of(connection));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(any(), any())).thenReturn(List.of());
+		when(googleGateway.fetchDayItems(eq("access"), any(), any())).thenReturn(List.of());
+
+		service(false).listImportableItems(jwt, account.getId(), null);
+
+		assertThat(connection.getStatus()).isEqualTo(ConnectionStatus.CONNECTED);
+		assertThat(connection.getLastError()).isNull();
+	}
+
+	@Test
 	void importEventsRejectsANonMember() {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());

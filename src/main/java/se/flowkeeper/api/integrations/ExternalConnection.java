@@ -129,6 +129,12 @@ public class ExternalConnection {
 		this.lastError = message;
 	}
 
+	/** A provider call succeeded after a previous failure had left this in ERROR — the connection has recovered. */
+	public void clearError() {
+		this.status = ConnectionStatus.CONNECTED;
+		this.lastError = null;
+	}
+
 	public void disconnect() {
 		this.status = ConnectionStatus.DISCONNECTED;
 		this.accessToken = null;

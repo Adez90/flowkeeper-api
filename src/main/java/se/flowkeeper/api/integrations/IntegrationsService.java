@@ -197,8 +197,12 @@ public class IntegrationsService {
 		ZoneId zone = userTimezones.resolve(user);
 		LocalDate day = date != null ? date : LocalDate.now(zone);
 
+		// Retry ERROR connections too, not just CONNECTED ones — a past failure (an expired
+		// token, a transient outage) shouldn't permanently hide a provider from future checks;
+		// only an explicit disconnect (no tokens left to use) should. See fetchGroup: a
+		// successful fetch clears ERROR back to CONNECTED, so this is self-healing.
 		List<ExternalConnection> connections = connectionRepository.findByUser_IdAndAccount_Id(user.getId(), accountId).stream()
-			.filter(c -> c.getStatus() == ConnectionStatus.CONNECTED)
+			.filter(c -> c.getStatus() != ConnectionStatus.DISCONNECTED)
 			.toList();
 
 		List<ImportableGroupResponse> groups = new ArrayList<>();
@@ -216,6 +220,7 @@ public class IntegrationsService {
 		try {
 			String accessToken = ensureFreshToken(connection, gateway);
 			List<ImportableItem> items = gateway.fetchDayItems(accessToken, day, zone);
+			connection.clearError();
 
 			Set<String> alreadyImported = new HashSet<>(
 				eventRepository.findExternalIdByUser_IdAndExternalProvider(user.getId(), connection.getProvider()));
