@@ -13,7 +13,8 @@ public record MeResponse(
 	boolean notifyInApp,
 	boolean notifyPush,
 	boolean notifyEmail,
-	List<AccountSummary> accounts
+	List<AccountSummary> accounts,
+	boolean isPlatformAdmin
 ) {
 
 	public record AccountSummary(UUID accountId, String name, String type, String role) {
