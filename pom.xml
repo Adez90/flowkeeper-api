@@ -53,6 +53,19 @@
 			<version>33.4.0</version>
 		</dependency>
 
+		<!-- Plain Logback integration, not sentry-spring-boot-starter — that
+		     starter still targets Spring Boot 3.5's autoconfiguration
+		     internals (confirmed against its own published POM), and Boot 4
+		     has already moved enough underneath us (see the Flyway comment
+		     above) that depending on Boot-3-shaped autoconfiguration classes
+		     is a real risk. This has no Spring dependency at all: it just
+		     adds an appender to the logging framework Boot already uses. -->
+		<dependency>
+			<groupId>io.sentry</groupId>
+			<artifactId>sentry-logback</artifactId>
+			<version>8.54.0</version>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

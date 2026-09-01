@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+	<!-- Keeps Spring Boot's own default console (and, if ever enabled, file)
+	     appenders exactly as they were — this only adds one more. -->
+	<include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+	<!-- No-ops when SENTRY_DSN is unset, same "blank means off" posture as
+	     every other optional integration in this app (Stripe, calendar
+	     sync, admin emails) — nothing here requires Sentry to be configured.
+	     WARN and above become real Sentry issues (this already covers every
+	     existing log.warn/log.error call, plus anything Spring's own default
+	     error handling logs for an unhandled exception); INFO and above are
+	     kept as breadcrumbs so an issue arrives with the handful of log
+	     lines that led up to it, not just the failure itself. -->
+	<appender name="SENTRY" class="io.sentry.logback.SentryAppender">
+		<options>
+			<dsn>${SENTRY_DSN:-}</dsn>
+			<environment>${SENTRY_ENVIRONMENT:-staging}</environment>
+			<release>${SENTRY_RELEASE:-}</release>
+			<!-- Never send request bodies/cookies/user IP by default — this
+			     app logs personal notes and energy readings, and defaults to
+			     the SDK's own privacy-conservative setting. -->
+			<sendDefaultPii>false</sendDefaultPii>
+		</options>
+		<minimumBreadcrumbLevel>INFO</minimumBreadcrumbLevel>
+		<minimumEventLevel>WARN</minimumEventLevel>
+	</appender>
+
+	<root level="INFO">
+		<appender-ref ref="SENTRY"/>
+	</root>
+</configuration>

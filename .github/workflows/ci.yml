@@ -58,8 +58,8 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
-          ssh "$SSH_USER@$SSH_HOST" '
+          ssh "$SSH_USER@$SSH_HOST" "
             cd /opt/flowkeeper &&
             docker compose -f docker-compose.prod.yml pull api &&
-            docker compose -f docker-compose.prod.yml up -d api
-          '
+            SENTRY_RELEASE=${{ github.sha }} docker compose -f docker-compose.prod.yml up -d api
+          "
