@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import se.flowkeeper.api.billing.PaymentProviderNotConfiguredException;
 import se.flowkeeper.api.integrations.IntegrationProviderNotConfiguredException;
 
@@ -38,6 +39,19 @@ public class GlobalExceptionHandler {
 		log.debug("Validation failed: {}", ex.getMessage());
 		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
 			.body(ApiError.of(ex.getMessage(), HttpStatus.BAD_REQUEST.value()));
+	}
+
+	/**
+	 * Without this, an oversized upload (e.g. a full-resolution phone photo
+	 * with no client-side resize) surfaces as Spring Boot's default,
+	 * generic 500 — indistinguishable to the caller from a real server
+	 * failure. This turns it into a specific, actionable 413 instead.
+	 */
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ApiError> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+		log.debug("Upload exceeded the configured size limit: {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+			.body(ApiError.of("File is too large — please choose a smaller image", HttpStatus.PAYLOAD_TOO_LARGE.value()));
 	}
 
 	@ExceptionHandler(PaymentProviderNotConfiguredException.class)
