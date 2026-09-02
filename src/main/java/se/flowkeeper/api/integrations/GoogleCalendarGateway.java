@@ -71,6 +71,7 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 	@Override
 	public OAuthTokenResult exchangeCode(String code, String redirectUri) {
 		requireConfigured();
+		log.info("Exchanging Google authorization code for tokens");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("client_id", clientId);
@@ -87,6 +88,8 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 			.body(JSON_MAP);
 
 		if (tokenResponse == null || tokenResponse.get("access_token") == null) {
+			log.warn("Google token exchange returned no access_token (response keys: {})",
+				tokenResponse != null ? tokenResponse.keySet() : "null body");
 			throw new IllegalStateException("Google did not return an access token");
 		}
 
@@ -115,6 +118,7 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 	@Override
 	public OAuthTokenResult refreshAccessToken(String refreshToken) {
 		requireConfigured();
+		log.info("Refreshing a Google access token");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("client_id", clientId);
@@ -130,6 +134,8 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 			.body(JSON_MAP);
 
 		if (tokenResponse == null || tokenResponse.get("access_token") == null) {
+			log.warn("Google token refresh returned no access_token (response keys: {})",
+				tokenResponse != null ? tokenResponse.keySet() : "null body");
 			throw new IllegalStateException("Google did not return an access token on refresh");
 		}
 
@@ -148,6 +154,7 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 
 		String timeMin = toGoogleTimestamp(date.atStartOfDay(zone));
 		String timeMax = toGoogleTimestamp(date.plusDays(1).atStartOfDay(zone));
+		log.info("Fetching Google Calendar events for {} (timeMin={}, timeMax={})", date, timeMin, timeMax);
 
 		Map<String, Object> response = restClient.get()
 			.uri(UriComponentsBuilder.fromUriString(EVENTS_URL)
@@ -164,8 +171,10 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 
 		Object items = response != null ? response.get("items") : null;
 		if (!(items instanceof List<?> list)) {
+			log.info("Google returned no 'items' list for {} — treating as zero events", date);
 			return List.of();
 		}
+		log.info("Google returned {} calendar item(s) for {}", list.size(), date);
 
 		return list.stream()
 			.map(item -> (Map<String, Object>) item)

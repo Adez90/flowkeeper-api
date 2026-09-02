@@ -73,6 +73,7 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 	@Override
 	public OAuthTokenResult exchangeCode(String code, String redirectUri) {
 		requireConfigured();
+		log.info("Exchanging Microsoft authorization code for tokens");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("client_id", clientId);
@@ -90,6 +91,8 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 			.body(JSON_MAP);
 
 		if (tokenResponse == null || tokenResponse.get("access_token") == null) {
+			log.warn("Microsoft token exchange returned no access_token (response keys: {})",
+				tokenResponse != null ? tokenResponse.keySet() : "null body");
 			throw new IllegalStateException("Microsoft did not return an access token");
 		}
 
@@ -123,6 +126,7 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 	@Override
 	public OAuthTokenResult refreshAccessToken(String refreshToken) {
 		requireConfigured();
+		log.info("Refreshing a Microsoft access token");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("client_id", clientId);
@@ -139,6 +143,8 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 			.body(JSON_MAP);
 
 		if (tokenResponse == null || tokenResponse.get("access_token") == null) {
+			log.warn("Microsoft token refresh returned no access_token (response keys: {})",
+				tokenResponse != null ? tokenResponse.keySet() : "null body");
 			throw new IllegalStateException("Microsoft did not return an access token on refresh");
 		}
 
@@ -158,6 +164,7 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 
 		String start = UTC_QUERY_FORMAT.format(date.atStartOfDay(zone).toInstant());
 		String end = UTC_QUERY_FORMAT.format(date.plusDays(1).atStartOfDay(zone).toInstant());
+		log.info("Fetching Microsoft calendar events for {} (start={}, end={})", date, start, end);
 
 		Map<String, Object> response = restClient.get()
 			.uri(UriComponentsBuilder.fromUriString(CALENDAR_VIEW_URL)
@@ -177,8 +184,10 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 
 		Object value = response != null ? response.get("value") : null;
 		if (!(value instanceof List<?> list)) {
+			log.info("Microsoft returned no 'value' list for {} — treating as zero events", date);
 			return List.of();
 		}
+		log.info("Microsoft returned {} calendar event(s) for {}", list.size(), date);
 
 		return list.stream()
 			.map(item -> (Map<String, Object>) item)
