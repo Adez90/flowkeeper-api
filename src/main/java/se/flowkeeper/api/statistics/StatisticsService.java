@@ -26,6 +26,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -100,8 +101,8 @@ public class StatisticsService {
 		Instant start = rangeStart.atStartOfDay(zone).toInstant();
 		Instant end = rangeEnd.atStartOfDay(zone).toInstant();
 
-		OverallCounts overall = eventStatisticsRepository.aggregateOverall(accountId, start, end);
-		List<TypeBreakdown> byType = eventStatisticsRepository.aggregateByType(accountId, start, end).stream()
+		OverallCounts overall = eventStatisticsRepository.aggregateOverall(accountId, user.getId(), start, end);
+		List<TypeBreakdown> byType = eventStatisticsRepository.aggregateByType(accountId, user.getId(), start, end).stream()
 			.map(TypeCounts::toBreakdown)
 			.toList();
 
@@ -130,7 +131,7 @@ public class StatisticsService {
 		ZoneId zone = userTimezones.resolve(user);
 		Instant start = rangeStart.atStartOfDay(zone).toInstant();
 		Instant end = rangeEndExclusive.atStartOfDay(zone).toInstant();
-		List<TrendRow> rows = eventStatisticsRepository.findTrendRows(accountId, start, end);
+		List<TrendRow> rows = eventStatisticsRepository.findTrendRows(accountId, user.getId(), start, end);
 
 		return new PersonalTrendResponse(rangeStart, rangeEndExclusive, bucketByDay(rows, rangeStart, rangeEndExclusive, zone));
 	}
@@ -160,6 +161,64 @@ public class StatisticsService {
 		AccountMember viewerMembership = requireMembership(accountId, viewer);
 		List<UUID> memberUserIds = groupMemberIds(accountId, groupId, viewer, viewerMembership);
 		return buildAggregateTrendResponse(viewer, accountId, memberUserIds, rangeStart, rangeEndExclusive);
+	}
+
+	/**
+	 * Each opted-in member's own name and Flow % within their group — the
+	 * peer-visible counterpart to {@link #groupStatistics}'s anonymous
+	 * rollup. Visible only to a viewer who is themselves a member of this
+	 * exact group (COACH or MEMBER, doesn't matter which): nobody above
+	 * group level — a department ADMIN, the org OWNER, or a peer COACH in
+	 * another group — reaches this, matching the confirmed design that
+	 * individual-level data never bubbles up past the group it was shared
+	 * within. Members who haven't opted into AccountMember.shareFlowWithPeers
+	 * simply don't appear — not withheld-with-a-flag like the aggregates,
+	 * since there's no anonymity floor to apply to already-identified,
+	 * already-consented data.
+	 */
+	@Transactional(readOnly = true)
+	public GroupMemberFlowResponse groupMemberFlow(
+			Jwt jwt, UUID accountId, UUID groupId, StatisticsPeriod period, LocalDate referenceDate) {
+		User viewer = currentUserResolver.require(jwt);
+		AccountMember viewerMembership = requireMembership(accountId, viewer);
+
+		if (viewerMembership.getGroup() == null || !groupId.equals(viewerMembership.getGroup().getId())) {
+			throw new AccessDeniedException(
+				"User %s is not a member of group %s".formatted(viewer.getId(), groupId));
+		}
+
+		List<AccountMember> sharingMembers = accountMemberRepository.findByGroup_Id(groupId).stream()
+			.filter(AccountMember::isShareFlowWithPeers)
+			.toList();
+
+		ZoneId zone = userTimezones.resolve(viewer);
+		LocalDate date = referenceDate != null ? referenceDate : LocalDate.now(zone);
+		LocalDate rangeStart = period.startOf(date);
+		LocalDate rangeEnd = period.endOf(date);
+
+		if (sharingMembers.isEmpty()) {
+			return new GroupMemberFlowResponse(period, rangeStart, rangeEnd, List.of());
+		}
+
+		Instant start = rangeStart.atStartOfDay(zone).toInstant();
+		Instant end = rangeEnd.atStartOfDay(zone).toInstant();
+		List<UUID> userIds = sharingMembers.stream().map(member -> member.getUser().getId()).toList();
+		Map<UUID, MemberFlowRow> byUser = eventStatisticsRepository.aggregateOverallPerUser(accountId, userIds, start, end)
+			.stream()
+			.collect(Collectors.toMap(MemberFlowRow::userId, row -> row));
+
+		List<MemberFlow> members = sharingMembers.stream()
+			.map(member -> {
+				MemberFlowRow row = byUser.get(member.getUser().getId());
+				long completed = row != null && row.completed() != null ? row.completed() : 0L;
+				long inFlow = row != null && row.inFlow() != null ? row.inFlow() : 0L;
+				double flowPercentage = completed != 0 ? (inFlow * 100.0 / completed) : 0.0;
+				return new MemberFlow(member.getUser().getId(), member.getUser().getDisplayName(), completed, flowPercentage);
+			})
+			.sorted(Comparator.comparing(MemberFlow::displayName))
+			.toList();
+
+		return new GroupMemberFlowResponse(period, rangeStart, rangeEnd, members);
 	}
 
 	private List<UUID> groupMemberIds(UUID accountId, UUID groupId, User viewer, AccountMember viewerMembership) {

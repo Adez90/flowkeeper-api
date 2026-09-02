@@ -35,6 +35,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -65,9 +66,9 @@ class StatisticsServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
+		when(eventStatisticsRepository.aggregateOverall(any(), any(), any(), any()))
 			.thenReturn(new OverallCounts(5L, 3L, 2L, 3.4, -0.5));
-		when(eventStatisticsRepository.aggregateByType(any(), any(), any()))
+		when(eventStatisticsRepository.aggregateByType(any(), any(), any(), any()))
 			.thenReturn(List.of(new TypeCounts(UUID.randomUUID(), "Meeting", 2L, -1.0)));
 
 		PersonalStatisticsResponse response = service().personalStatistics(
@@ -86,14 +87,33 @@ class StatisticsServiceTest {
 	}
 
 	@Test
+	void personalStatisticsIsScopedToTheCallersOwnUserIdNotJustTheAccount() {
+		// An organisation account can hold many members' events — personal
+		// statistics must only ever be the caller's own, never leak the rest
+		// of the account's data in under "my" numbers.
+		UUID accountId = UUID.randomUUID();
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
+			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.MEMBER)));
+		when(eventStatisticsRepository.aggregateOverall(any(), any(), any(), any()))
+			.thenReturn(new OverallCounts(0L, 0L, 0L, null, null));
+		when(eventStatisticsRepository.aggregateByType(any(), any(), any(), any())).thenReturn(List.of());
+
+		service().personalStatistics(jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		verify(eventStatisticsRepository).aggregateOverall(eq(accountId), eq(user.getId()), any(), any());
+		verify(eventStatisticsRepository).aggregateByType(eq(accountId), eq(user.getId()), any(), any());
+	}
+
+	@Test
 	void zeroEventsInRangeReturnsZeroesNotNulls() {
 		UUID accountId = UUID.randomUUID();
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, user, MemberRole.OWNER)));
-		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
+		when(eventStatisticsRepository.aggregateOverall(any(), any(), any(), any()))
 			.thenReturn(new OverallCounts(0L, 0L, 0L, null, null));
-		when(eventStatisticsRepository.aggregateByType(any(), any(), any()))
+		when(eventStatisticsRepository.aggregateByType(any(), any(), any(), any()))
 			.thenReturn(List.of());
 
 		PersonalStatisticsResponse response = service().personalStatistics(
@@ -116,16 +136,16 @@ class StatisticsServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(stockholmUser);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any()))
 			.thenReturn(Optional.of(new AccountMember(account, stockholmUser, MemberRole.OWNER)));
-		when(eventStatisticsRepository.aggregateOverall(any(), any(), any()))
+		when(eventStatisticsRepository.aggregateOverall(any(), any(), any(), any()))
 			.thenReturn(new OverallCounts(0L, 0L, 0L, null, null));
-		when(eventStatisticsRepository.aggregateByType(any(), any(), any())).thenReturn(List.of());
+		when(eventStatisticsRepository.aggregateByType(any(), any(), any(), any())).thenReturn(List.of());
 
 		// Stockholm is UTC+2 in June (daylight saving) — chosen so this
 		// test actually fails if the code ever reverts to hardcoded UTC.
 		service().personalStatistics(jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 6, 15));
 
 		ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
-		verify(eventStatisticsRepository).aggregateOverall(any(), startCaptor.capture(), any());
+		verify(eventStatisticsRepository).aggregateOverall(any(), any(), startCaptor.capture(), any());
 		Instant expectedStart = LocalDate.of(2026, 6, 15).atStartOfDay(ZoneId.of("Europe/Stockholm")).toInstant();
 		assertThat(startCaptor.getValue()).isEqualTo(expectedStart);
 	}
@@ -373,7 +393,7 @@ class StatisticsServiceTest {
 		// Day 1 (Mar 12): one completed in-flow (3+3=6), one completed not in-flow (1+1=2).
 		// Day 2 (Mar 13): nothing.
 		// Day 3 (Mar 14): one still-open event (no outgoingEnergy).
-		when(eventStatisticsRepository.findTrendRows(any(), any(), any())).thenReturn(List.of(
+		when(eventStatisticsRepository.findTrendRows(any(), any(), any(), any())).thenReturn(List.of(
 			new TrendRow(LocalDate.of(2026, 3, 12).atStartOfDay(ZoneId.of("UTC")).plusHours(9).toInstant(),
 				EventStatus.COMPLETED, (short) 3, (short) 3),
 			new TrendRow(LocalDate.of(2026, 3, 12).atStartOfDay(ZoneId.of("UTC")).plusHours(15).toInstant(),
@@ -384,6 +404,7 @@ class StatisticsServiceTest {
 		PersonalTrendResponse response = service().personalTrend(
 			jwt, accountId, LocalDate.of(2026, 3, 12), LocalDate.of(2026, 3, 15));
 
+		verify(eventStatisticsRepository).findTrendRows(eq(accountId), eq(user.getId()), any(), any());
 		assertThat(response.rangeStart()).isEqualTo(LocalDate.of(2026, 3, 12));
 		assertThat(response.rangeEndExclusive()).isEqualTo(LocalDate.of(2026, 3, 15));
 		assertThat(response.points()).hasSize(3);
@@ -493,6 +514,98 @@ class StatisticsServiceTest {
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());
 
 		assertThatThrownBy(() -> service().personalStatistics(jwt, UUID.randomUUID(), StatisticsPeriod.WEEK, null))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
+	void groupMemberFlowReturnsOnlyTheOptedInMembersWithTheirOwnFlowPercentage() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		// The viewer here is a plain MEMBER of the group, not its coach —
+		// this view is for teammates, not just managers.
+		AccountMember viewerMembership = new AccountMember(account, user, MemberRole.MEMBER, null, group);
+
+		User sharingUser = new User("kc-sharing", "Sharing Person", "sharing@example.com");
+		AccountMember sharingMember = new AccountMember(account, sharingUser, MemberRole.MEMBER, null, group);
+		sharingMember.updateSharePreference(true);
+
+		User quietUser = new User("kc-quiet", "Quiet Person", "quiet@example.com");
+		AccountMember quietMember = new AccountMember(account, quietUser, MemberRole.MEMBER, null, group);
+		// quietMember never opts in — shareFlowWithPeers stays false.
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(viewerMembership));
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(viewerMembership, sharingMember, quietMember));
+		when(eventStatisticsRepository.aggregateOverallPerUser(eq(accountId), any(), any(), any()))
+			.thenReturn(List.of(new MemberFlowRow(sharingUser.getId(), 4L, 3L)));
+
+		GroupMemberFlowResponse response = service().groupMemberFlow(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.members()).hasSize(1);
+		MemberFlow member = response.members().get(0);
+		assertThat(member.userId()).isEqualTo(sharingUser.getId());
+		assertThat(member.displayName()).isEqualTo("Sharing Person");
+		assertThat(member.completedEvents()).isEqualTo(4);
+		// 3 of 4 completed "in flow" -> 75%.
+		assertThat(member.flowPercentage()).isEqualTo(75.0);
+	}
+
+	@Test
+	void groupMemberFlowReturnsAnOptedInMemberWithZeroEventsRatherThanOmittingThem() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember viewerMembership = new AccountMember(account, user, MemberRole.MEMBER, null, group);
+		viewerMembership.updateSharePreference(true);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(viewerMembership));
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(viewerMembership));
+		// Opted in, but hasn't logged anything in this period.
+		when(eventStatisticsRepository.aggregateOverallPerUser(eq(accountId), any(), any(), any())).thenReturn(List.of());
+
+		GroupMemberFlowResponse response = service().groupMemberFlow(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.members()).hasSize(1);
+		assertThat(response.members().get(0).completedEvents()).isZero();
+		assertThat(response.members().get(0).flowPercentage()).isZero();
+	}
+
+	@Test
+	void groupMemberFlowReturnsEmptyWhenNobodyHasOptedIn() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember viewerMembership = new AccountMember(account, user, MemberRole.MEMBER, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(viewerMembership));
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(viewerMembership));
+
+		GroupMemberFlowResponse response = service().groupMemberFlow(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.members()).isEmpty();
+	}
+
+	@Test
+	void groupMemberFlowRejectsAViewerWhoIsNotAMemberOfThisExactGroup() {
+		// A department ADMIN (or org OWNER, or a coach of a different group)
+		// supervises this group's anonymous rollup but must never reach the
+		// named, individual-level peer view — that's the whole point of
+		// keeping it scoped to "am I actually in this group".
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Department department = new Department(account, "Engineering");
+		AccountMember adminMembership = new AccountMember(account, user, MemberRole.ADMIN, department, null);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(adminMembership));
+
+		assertThatThrownBy(() -> service().groupMemberFlow(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12)))
 			.isInstanceOf(AccessDeniedException.class);
 	}
 

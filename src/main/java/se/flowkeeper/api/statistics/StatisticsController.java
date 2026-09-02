@@ -53,6 +53,17 @@ public class StatisticsController {
 		return statisticsService.groupStatistics(jwt, accountId, groupId, period, date);
 	}
 
+	/** Each opted-in group member's own name and Flow % — only for a viewer who is themselves a member of this exact group. */
+	@GetMapping("/api/v1/statistics/group/members")
+	public GroupMemberFlowResponse groupMembers(
+			@AuthenticationPrincipal Jwt jwt,
+			@RequestParam UUID accountId,
+			@RequestParam UUID groupId,
+			@RequestParam StatisticsPeriod period,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+		return statisticsService.groupMemberFlow(jwt, accountId, groupId, period, date);
+	}
+
 	/** A department's rolled-up Flow % (every member under it, directly or via one of its groups). */
 	@GetMapping("/api/v1/statistics/department")
 	public AggregateStatisticsResponse department(

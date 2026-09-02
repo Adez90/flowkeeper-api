@@ -120,6 +120,74 @@ class StatisticsIntegrationTest extends AbstractIntegrationTest {
 	}
 
 	@Test
+	void personalStatisticsOnAnOrganisationAccountOnlyReflectsTheCallersOwnEvents() throws Exception {
+		// Regression test: personal statistics used to query by accountId
+		// alone, so on an organisation account (which can hold many
+		// members' events) it silently returned everyone's combined
+		// numbers under "my" stats instead of just the caller's own.
+		Consumer<Jwt.Builder> asOwner = b -> b.subject("kc-stats-iso-owner").claim("name", "Owner").claim("email", "stats-iso-owner@example.com");
+		Consumer<Jwt.Builder> asMember = b -> b.subject("kc-stats-iso-member").claim("name", "Member").claim("email", "stats-iso-member@example.com");
+
+		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asOwner))).andExpect(status().isCreated());
+		mockMvc.perform(post("/api/v1/registration").with(jwt().jwt(asMember))).andExpect(status().isCreated());
+
+		UUID orgAccountId = UUID.fromString(objectMapper.readTree(mockMvc.perform(post("/api/v1/organisations")
+				.with(jwt().jwt(asOwner)).contentType(MediaType.APPLICATION_JSON).content("""
+					{"name":"Isolation Test AB"}
+					""")).andReturn().getResponse().getContentAsString()).get("accountId").asText());
+
+		mockMvc.perform(post("/api/v1/organisations/" + orgAccountId + "/members")
+				.with(jwt().jwt(asOwner))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"email":"stats-iso-member@example.com","role":"MEMBER"}
+					"""))
+			.andExpect(status().isCreated());
+
+		UUID ownerEventTypeId = eventTypeIdFor(orgAccountId, asOwner);
+		UUID memberEventTypeId = eventTypeIdFor(orgAccountId, asMember);
+
+		// Owner logs 2 events, member logs 1 — if isolation is broken, both
+		// callers' personal view would show totalEvents=3.
+		createEventFor(orgAccountId, ownerEventTypeId, asOwner, 3);
+		createEventFor(orgAccountId, ownerEventTypeId, asOwner, 3);
+		createEventFor(orgAccountId, memberEventTypeId, asMember, 3);
+
+		MvcResult ownerResult = mockMvc.perform(get("/api/v1/statistics/personal")
+				.param("accountId", orgAccountId.toString())
+				.param("period", "DAY")
+				.with(jwt().jwt(asOwner)))
+			.andExpect(status().isOk())
+			.andReturn();
+		MvcResult memberResult = mockMvc.perform(get("/api/v1/statistics/personal")
+				.param("accountId", orgAccountId.toString())
+				.param("period", "DAY")
+				.with(jwt().jwt(asMember)))
+			.andExpect(status().isOk())
+			.andReturn();
+
+		assertThat(objectMapper.readTree(ownerResult.getResponse().getContentAsString()).get("totalEvents").asLong()).isEqualTo(2);
+		assertThat(objectMapper.readTree(memberResult.getResponse().getContentAsString()).get("totalEvents").asLong()).isEqualTo(1);
+	}
+
+	private UUID eventTypeIdFor(UUID targetAccountId, Consumer<Jwt.Builder> asUser) throws Exception {
+		MvcResult types = mockMvc.perform(get("/api/v1/event-types").param("accountId", targetAccountId.toString()).with(jwt().jwt(asUser)))
+			.andReturn();
+		return UUID.fromString(objectMapper.readTree(types.getResponse().getContentAsString()).get(0).get("id").asText());
+	}
+
+	private void createEventFor(UUID targetAccountId, UUID eventTypeId, Consumer<Jwt.Builder> asUser, int ingoingEnergy) throws Exception {
+		String body = """
+			{"accountId":"%s","eventTypeId":"%s","ingoingEnergy":%d,"ingoingNote":null}
+			""".formatted(targetAccountId, eventTypeId, ingoingEnergy);
+		mockMvc.perform(post("/api/v1/events")
+				.with(jwt().jwt(asUser))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+			.andExpect(status().isCreated());
+	}
+
+	@Test
 	void personalTrendRejectsAnInvalidRange() throws Exception {
 		setUpAccount("kc-stats-subject-4", "stats-tester-4@example.com");
 

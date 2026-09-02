@@ -21,6 +21,10 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 	// is the same formula the old FlowKeeper apps used for "Flow %", recovered
 	// from oldflowkeeper/ResultHandler.java. Our 1-5 energy scale matches the
 	// old app's scale, so the band applies unchanged.
+	//
+	// Scoped to a single userId, not just the account: an organisation
+	// account can hold many members' events, and "personal" statistics must
+	// only ever be that one caller's own numbers, never the whole account's.
 	@Query("""
 		select new se.flowkeeper.api.statistics.OverallCounts(
 			count(e),
@@ -31,9 +35,11 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 			avg(e.outgoingEnergy - e.ingoingEnergy)
 		)
 		from Event e
-		where e.account.id = :accountId and e.startedAt >= :start and e.startedAt < :end
+		where e.account.id = :accountId and e.user.id = :userId and e.startedAt >= :start and e.startedAt < :end
 		""")
-	OverallCounts aggregateOverall(@Param("accountId") UUID accountId, @Param("start") Instant start, @Param("end") Instant end);
+	OverallCounts aggregateOverall(
+		@Param("accountId") UUID accountId, @Param("userId") UUID userId,
+		@Param("start") Instant start, @Param("end") Instant end);
 
 	// Same shape as aggregateOverall, but scoped to a specific set of users
 	// rather than every member of the account — how a group/department/org
@@ -57,16 +63,19 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 		@Param("accountId") UUID accountId, @Param("userIds") Collection<UUID> userIds,
 		@Param("start") Instant start, @Param("end") Instant end);
 
+	// Scoped to a single userId — same reason as aggregateOverall above.
 	@Query("""
 		select new se.flowkeeper.api.statistics.TypeCounts(
 			et.id, et.label, count(e), avg(e.outgoingEnergy - e.ingoingEnergy)
 		)
 		from Event e join e.eventType et
-		where e.account.id = :accountId and e.startedAt >= :start and e.startedAt < :end
+		where e.account.id = :accountId and e.user.id = :userId and e.startedAt >= :start and e.startedAt < :end
 		group by et.id, et.label
 		order by count(e) desc
 		""")
-	List<TypeCounts> aggregateByType(@Param("accountId") UUID accountId, @Param("start") Instant start, @Param("end") Instant end);
+	List<TypeCounts> aggregateByType(
+		@Param("accountId") UUID accountId, @Param("userId") UUID userId,
+		@Param("start") Instant start, @Param("end") Instant end);
 
 	// Same shape as aggregateByType, scoped to a set of users — how the
 	// organisation-wide anonymous by-type breakdown is computed (see
@@ -94,12 +103,34 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 	// StatisticsService#bucketByDay), since JPQL/Postgres date_trunc can't be
 	// parameterized by a per-user IANA zone the way a repeated Instant-range
 	// query already handles elsewhere in this class.
+	// Scoped to a single userId — same reason as aggregateOverall above.
 	@Query("""
 		select new se.flowkeeper.api.statistics.TrendRow(e.startedAt, e.status, e.ingoingEnergy, e.outgoingEnergy)
 		from Event e
-		where e.account.id = :accountId and e.startedAt >= :start and e.startedAt < :end
+		where e.account.id = :accountId and e.user.id = :userId and e.startedAt >= :start and e.startedAt < :end
 		""")
-	List<TrendRow> findTrendRows(@Param("accountId") UUID accountId, @Param("start") Instant start, @Param("end") Instant end);
+	List<TrendRow> findTrendRows(
+		@Param("accountId") UUID accountId, @Param("userId") UUID userId,
+		@Param("start") Instant start, @Param("end") Instant end);
+
+	// Per-member counts for a small, already-authorized set of users (a
+	// group's peer-sharing view) — same shape as aggregateOverallForUsers but
+	// grouped by user instead of pooled, since each opted-in member's own
+	// number is shown individually here rather than rolled into one figure.
+	@Query("""
+		select new se.flowkeeper.api.statistics.MemberFlowRow(
+			e.user.id,
+			sum(case when e.status = se.flowkeeper.api.event.EventStatus.COMPLETED then 1L else 0L end),
+			sum(case when e.status = se.flowkeeper.api.event.EventStatus.COMPLETED
+				and (e.ingoingEnergy + e.outgoingEnergy) between 4 and 6 then 1L else 0L end)
+		)
+		from Event e
+		where e.account.id = :accountId and e.user.id in :userIds and e.startedAt >= :start and e.startedAt < :end
+		group by e.user.id
+		""")
+	List<MemberFlowRow> aggregateOverallPerUser(
+		@Param("accountId") UUID accountId, @Param("userIds") Collection<UUID> userIds,
+		@Param("start") Instant start, @Param("end") Instant end);
 
 	// Same shape as findTrendRows, scoped to a specific set of users — how a
 	// group/department/organisation trend is computed. Only ever called once
