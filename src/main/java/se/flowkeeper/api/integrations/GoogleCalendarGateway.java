@@ -14,7 +14,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -146,8 +146,8 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 	public List<ImportableItem> fetchDayItems(String accessToken, LocalDate date, ZoneId zone) {
 		requireConfigured();
 
-		String timeMin = date.atStartOfDay(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-		String timeMax = date.plusDays(1).atStartOfDay(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+		String timeMin = toGoogleTimestamp(date.atStartOfDay(zone));
+		String timeMax = toGoogleTimestamp(date.plusDays(1).atStartOfDay(zone));
 
 		Map<String, Object> response = restClient.get()
 			.uri(UriComponentsBuilder.fromUriString(EVENTS_URL)
@@ -175,6 +175,20 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 			// guessing a start/end.
 			.filter(item -> item != null)
 			.toList();
+	}
+
+	/**
+	 * Formats as a UTC instant (e.g. "2026-09-01T22:00:00Z") rather than
+	 * ISO_OFFSET_DATE_TIME's "+02:00" style, which UriComponentsBuilder's
+	 * RFC 3986 encoder leaves as a literal '+' — Google's query parser then
+	 * decodes that '+' as a space (standard form-encoding convention),
+	 * corrupting timeMin/timeMax into an invalid timestamp and failing
+	 * with a 400 for every positive UTC offset (this went unnoticed until
+	 * a user in one actually exercised the sync — negative offsets and UTC
+	 * have no '+' to mangle).
+	 */
+	static String toGoogleTimestamp(ZonedDateTime dateTime) {
+		return dateTime.toInstant().toString();
 	}
 
 	private ImportableItem toImportableItem(Map<String, Object> item) {

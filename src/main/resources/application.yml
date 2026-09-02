@@ -101,6 +101,15 @@ server:
   # upload endpoint would build "http://" URLs behind an https:// domain.
   forward-headers-strategy: framework
 
+springdoc:
+  # Enabled by default (springdoc's own default) would expose the OpenAPI
+  # spec and Swagger UI on every deployment, staging included — off unless
+  # explicitly opted into (e.g. for local development).
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+
 management:
   endpoints:
     web:
@@ -110,6 +119,14 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    mail:
+      # Actuator's auto-configured mail health check actively tests the
+      # SMTP connection above — which is unconfigured (localhost:1025) by
+      # design until a real relay is set, per the comment on spring.mail.
+      # Without this it fails that check (and logs/reports it) on every
+      # health probe forever, burying real issues under expected noise.
+      enabled: false
 
 logging:
   level:
