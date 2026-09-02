@@ -171,7 +171,7 @@ public class IntegrationsService {
 			log.info("User {} connected {} for account {}", oauthState.getUser().getId(), provider, oauthState.getAccount().getId());
 			return successUrl;
 		} catch (Exception e) {
-			log.warn("OAuth token exchange failed for {}: {}", provider, e.getMessage());
+			log.warn("OAuth token exchange failed for {}: {}", provider, e.getMessage(), e);
 			return errorUrl;
 		}
 	}
@@ -236,7 +236,7 @@ public class IntegrationsService {
 			// A single provider failing (revoked access, an expired refresh
 			// token, a transient outage) shouldn't take the whole request
 			// down — the other connected providers still return normally.
-			log.warn("Couldn't fetch importable items from {} for user {}: {}", connection.getProvider(), user.getId(), e.getMessage());
+			log.warn("Couldn't fetch importable items from {} for user {}: {}", connection.getProvider(), user.getId(), e.getMessage(), e);
 			connection.markError(e.getMessage());
 			return new ImportableGroupResponse(connection.getProvider(), true, List.of());
 		}

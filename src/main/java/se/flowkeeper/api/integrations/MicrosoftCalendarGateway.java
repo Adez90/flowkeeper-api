@@ -118,7 +118,7 @@ public class MicrosoftCalendarGateway implements OAuthCalendarGateway {
 			Object mail = me.get("mail");
 			return mail != null ? (String) mail : (String) me.get("userPrincipalName");
 		} catch (Exception e) {
-			log.warn("Couldn't fetch Microsoft account label: {}", e.getMessage());
+			log.warn("Couldn't fetch Microsoft account label: {}", e.getMessage(), e);
 			return null;
 		}
 	}

@@ -110,7 +110,7 @@ public class GoogleCalendarGateway implements OAuthCalendarGateway {
 				.body(JSON_MAP);
 			return userInfo != null ? (String) userInfo.get("email") : null;
 		} catch (Exception e) {
-			log.warn("Couldn't fetch Google account label: {}", e.getMessage());
+			log.warn("Couldn't fetch Google account label: {}", e.getMessage(), e);
 			return null;
 		}
 	}
