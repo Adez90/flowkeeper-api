@@ -27,8 +27,12 @@ public class IntegrationsCallbackController {
 	public ResponseEntity<Void> callback(
 			@PathVariable ExternalProvider provider,
 			@RequestParam(required = false) String code,
-			@RequestParam(required = false) String state) {
-		String redirectTo = integrationsService.handleCallback(provider, code, state);
+			@RequestParam(required = false) String state,
+			// Sent by the provider instead of code when the user denies access,
+			// or the request was otherwise rejected (e.g. "access_denied") —
+			// previously not even read, so that reason was lost entirely.
+			@RequestParam(required = false) String error) {
+		String redirectTo = integrationsService.handleCallback(provider, code, state, error);
 		return ResponseEntity.status(HttpStatus.FOUND)
 			.headers(h -> h.add(HttpHeaders.LOCATION, redirectTo))
 			.build();

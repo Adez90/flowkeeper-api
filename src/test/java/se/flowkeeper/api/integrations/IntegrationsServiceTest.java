@@ -191,17 +191,26 @@ class IntegrationsServiceTest {
 
 	@Test
 	void handleCallbackReturnsTheErrorUrlWhenCodeOrStateIsMissing() {
-		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, null, "some-state");
+		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, null, "some-state", null);
 
 		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=error");
 		verify(oauthStateRepository, never()).findById(any());
 	}
 
 	@Test
+	void handleCallbackAcceptsAProviderErrorReasonWithoutThrowing() {
+		// e.g. the user clicked "Deny" on Strava/Google's own consent screen
+		// — no code, but a real reason instead of silence.
+		String result = service(false).handleCallback(ExternalProvider.STRAVA, null, "some-state", "access_denied");
+
+		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=error");
+	}
+
+	@Test
 	void handleCallbackReturnsTheErrorUrlForAnUnknownState() {
 		when(oauthStateRepository.findById("bad-state")).thenReturn(Optional.empty());
 
-		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "bad-state");
+		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "bad-state", null);
 
 		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=error");
 	}
@@ -212,7 +221,7 @@ class IntegrationsServiceTest {
 			"http://localhost:8080/api/v1/integrations/oauth/GOOGLE_CALENDAR/callback", Instant.now().minusSeconds(60));
 		when(oauthStateRepository.findById("state-1")).thenReturn(Optional.of(expired));
 
-		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1");
+		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1", null);
 
 		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=error");
 		verify(oauthStateRepository).delete(expired);
@@ -224,7 +233,7 @@ class IntegrationsServiceTest {
 			"http://localhost:8080/api/v1/integrations/oauth/GOOGLE_CALENDAR/callback", Instant.now().plusSeconds(600));
 		when(oauthStateRepository.findById("state-1")).thenReturn(Optional.of(state));
 
-		String result = service(false).handleCallback(ExternalProvider.MICROSOFT_CALENDAR, "code", "state-1");
+		String result = service(false).handleCallback(ExternalProvider.MICROSOFT_CALENDAR, "code", "state-1", null);
 
 		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=error");
 	}
@@ -238,7 +247,7 @@ class IntegrationsServiceTest {
 			.thenReturn(new OAuthTokenResult("access", "refresh", Instant.now().plusSeconds(3600), "anders@gmail.com"));
 		when(connectionRepository.findByUser_IdAndAccount_IdAndProvider(any(), any(), any())).thenReturn(Optional.empty());
 
-		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1");
+		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1", null);
 
 		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=success");
 		org.mockito.ArgumentCaptor<ExternalConnection> captor = org.mockito.ArgumentCaptor.forClass(ExternalConnection.class);
@@ -257,7 +266,7 @@ class IntegrationsServiceTest {
 		ExternalConnection existing = new ExternalConnection(user, account, ExternalProvider.GOOGLE_CALENDAR);
 		when(connectionRepository.findByUser_IdAndAccount_IdAndProvider(any(), any(), any())).thenReturn(Optional.of(existing));
 
-		service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1");
+		service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1", null);
 
 		verify(connectionRepository).save(existing);
 		assertThat(existing.getAccessToken()).isEqualTo("access-2");
@@ -270,7 +279,7 @@ class IntegrationsServiceTest {
 		when(oauthStateRepository.findById("state-1")).thenReturn(Optional.of(state));
 		when(googleGateway.exchangeCode(any(), any())).thenThrow(new RuntimeException("boom"));
 
-		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1");
+		String result = service(false).handleCallback(ExternalProvider.GOOGLE_CALENDAR, "code", "state-1", null);
 
 		assertThat(result).isEqualTo("http://localhost:5173/app/integrations?connected=error");
 		verify(connectionRepository, never()).save(any());

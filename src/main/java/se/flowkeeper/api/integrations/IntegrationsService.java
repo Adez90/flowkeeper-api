@@ -130,11 +130,15 @@ public class IntegrationsService {
 	 * response, not a JSON API call the caller can branch on.
 	 */
 	@Transactional
-	public String handleCallback(ExternalProvider provider, String code, String state) {
+	public String handleCallback(ExternalProvider provider, String code, String state, String error) {
 		String successUrl = appOrigin + "/app/integrations?connected=success";
 		String errorUrl = appOrigin + "/app/integrations?connected=error";
 
 		if (code == null || state == null) {
+			// error is typically "access_denied" (the user declined on the
+			// provider's own consent screen) but could be anything the
+			// provider sends — logged as-is rather than assumed.
+			log.warn("OAuth callback for {} came back without a code (error={}, state present={})", provider, error, state != null);
 			return errorUrl;
 		}
 
@@ -153,6 +157,7 @@ public class IntegrationsService {
 
 		OAuthCalendarGateway gateway = gatewaysByProvider.get(provider);
 		if (gateway == null) {
+			log.warn("OAuth callback for {} but no gateway is registered for it", provider);
 			return errorUrl;
 		}
 

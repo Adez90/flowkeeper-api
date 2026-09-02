@@ -1,5 +1,7 @@
 package se.flowkeeper.api.integrations;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
@@ -19,6 +21,7 @@ import java.util.Map;
 @Component
 public class StravaGateway implements OAuthCalendarGateway {
 
+	private static final Logger log = LoggerFactory.getLogger(StravaGateway.class);
 	private static final String AUTHORIZE_URL = "https://www.strava.com/oauth/authorize";
 	private static final String TOKEN_URL = "https://www.strava.com/oauth/token";
 	private static final String ACTIVITIES_URL = "https://www.strava.com/api/v3/athlete/activities";
@@ -69,6 +72,7 @@ public class StravaGateway implements OAuthCalendarGateway {
 	@SuppressWarnings("unchecked")
 	public OAuthTokenResult exchangeCode(String code, String redirectUri) {
 		requireConfigured();
+		log.info("Exchanging Strava authorization code for tokens");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("client_id", clientId);
@@ -84,6 +88,8 @@ public class StravaGateway implements OAuthCalendarGateway {
 			.body(JSON_MAP);
 
 		if (tokenResponse == null || tokenResponse.get("access_token") == null) {
+			log.warn("Strava token exchange returned no access_token (response keys: {})",
+				tokenResponse != null ? tokenResponse.keySet() : "null body");
 			throw new IllegalStateException("Strava did not return an access token");
 		}
 
@@ -111,6 +117,7 @@ public class StravaGateway implements OAuthCalendarGateway {
 	@SuppressWarnings("unchecked")
 	public OAuthTokenResult refreshAccessToken(String refreshToken) {
 		requireConfigured();
+		log.info("Refreshing a Strava access token");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("client_id", clientId);
@@ -126,6 +133,8 @@ public class StravaGateway implements OAuthCalendarGateway {
 			.body(JSON_MAP);
 
 		if (tokenResponse == null || tokenResponse.get("access_token") == null) {
+			log.warn("Strava token refresh returned no access_token (response keys: {})",
+				tokenResponse != null ? tokenResponse.keySet() : "null body");
 			throw new IllegalStateException("Strava did not return an access token on refresh");
 		}
 
@@ -144,6 +153,7 @@ public class StravaGateway implements OAuthCalendarGateway {
 
 		long after = date.atStartOfDay(zone).toEpochSecond();
 		long before = date.plusDays(1).atStartOfDay(zone).toEpochSecond();
+		log.info("Fetching Strava activities for {} (after={}, before={})", date, after, before);
 
 		List<Map<String, Object>> activities = restClient.get()
 			.uri(UriComponentsBuilder.fromUriString(ACTIVITIES_URL)
@@ -157,8 +167,10 @@ public class StravaGateway implements OAuthCalendarGateway {
 			.body(JSON_LIST);
 
 		if (activities == null) {
+			log.info("Strava returned no body for {} — treating as zero activities", date);
 			return List.of();
 		}
+		log.info("Strava returned {} activity(ies) for {}", activities.size(), date);
 
 		return activities.stream()
 			.map(this::toImportableItem)
