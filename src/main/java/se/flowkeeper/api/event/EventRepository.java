@@ -1,6 +1,8 @@
 package se.flowkeeper.api.event;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import se.flowkeeper.api.integrations.ExternalProvider;
 
 import java.time.Instant;
@@ -26,7 +28,18 @@ public interface EventRepository extends JpaRepository<Event, UUID> {
 	/** Has this user started any event in the given window — the unused-account reminder checks this against "today" in the user's own timezone. */
 	boolean existsByUser_IdAndStartedAtBetween(UUID userId, Instant start, Instant end);
 
-	/** Which of this provider's items this user has already imported — what the importable list filters out so nothing is offered twice. */
-	List<String> findExternalIdByUser_IdAndExternalProvider(UUID userId, ExternalProvider externalProvider);
+	/**
+	 * Which of this provider's items this user has already imported — what
+	 * the importable list filters out so nothing is offered twice.
+	 * Needs an explicit projection: derived-query naming ("findExternalIdBy...")
+	 * doesn't actually select just that column — without @Query, Spring Data
+	 * runs "SELECT e FROM Event e WHERE ..." regardless of the method name's
+	 * leading words, returning full Event entities that then fail to convert
+	 * to List<String> as soon as there's at least one match (an empty result
+	 * needs no per-element conversion, which is why this went unnoticed until
+	 * someone had a previously-imported item on file for a given provider).
+	 */
+	@Query("SELECT e.externalId FROM Event e WHERE e.user.id = :userId AND e.externalProvider = :externalProvider")
+	List<String> findExternalIdByUser_IdAndExternalProvider(@Param("userId") UUID userId, @Param("externalProvider") ExternalProvider externalProvider);
 
 }
