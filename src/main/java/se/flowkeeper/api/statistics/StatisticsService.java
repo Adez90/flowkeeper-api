@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.MemberRole;
+import se.flowkeeper.api.billing.PlatformAdmins;
 import se.flowkeeper.api.common.ResourceNotFoundException;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.event.EventStatus;
@@ -50,6 +51,14 @@ public class StatisticsService {
 	// actually exercises it.
 	private static final int MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS = 10;
 
+	// A platform admin (see PlatformAdmins — blank/opt-in, same allowlist the
+	// promo-code and diagnostics tools use) can see real numbers below these
+	// thresholds. This does NOT bypass the supervisory-ladder authorization
+	// above — an admin still only reaches this check for an account they're
+	// already a legitimate viewer of. It exists so a small real or test
+	// organisation (fewer members than the privacy floor) can still be
+	// verified end to end instead of every aggregate coming back withheld.
+
 	// Bounds a trend response to something a chart (and a single in-memory
 	// bucketing pass) can reasonably handle — about six months of daily
 	// points, comfortably more than any real manager view needs.
@@ -61,19 +70,22 @@ public class StatisticsService {
 	private final GroupRepository groupRepository;
 	private final CurrentUserResolver currentUserResolver;
 	private final UserTimezones userTimezones;
+	private final PlatformAdmins platformAdmins;
 
 	public StatisticsService(EventStatisticsRepository eventStatisticsRepository,
 			AccountMemberRepository accountMemberRepository,
 			DepartmentRepository departmentRepository,
 			GroupRepository groupRepository,
 			CurrentUserResolver currentUserResolver,
-			UserTimezones userTimezones) {
+			UserTimezones userTimezones,
+			PlatformAdmins platformAdmins) {
 		this.eventStatisticsRepository = eventStatisticsRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.departmentRepository = departmentRepository;
 		this.groupRepository = groupRepository;
 		this.currentUserResolver = currentUserResolver;
 		this.userTimezones = userTimezones;
+		this.platformAdmins = platformAdmins;
 	}
 
 	@Transactional(readOnly = true)
@@ -282,9 +294,14 @@ public class StatisticsService {
 
 		int memberCount = memberUserIds.size();
 		if (memberCount < MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS) {
-			log.debug("Anonymous type stats for account {} have only {} member(s), below the minimum of {} — withholding",
-				accountId, memberCount, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS);
-			return new OrganisationTypeStatisticsResponse(period, rangeStart, rangeEnd, memberCount, true, List.of());
+			if (platformAdmins.isAdmin(viewer)) {
+				log.info("Platform admin {} viewing anonymous type stats for account {} below the minimum of {} ({} member(s))",
+					viewer.getEmail(), accountId, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS, memberCount);
+			} else {
+				log.debug("Anonymous type stats for account {} have only {} member(s), below the minimum of {} — withholding",
+					accountId, memberCount, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS);
+				return new OrganisationTypeStatisticsResponse(period, rangeStart, rangeEnd, memberCount, true, List.of());
+			}
 		}
 
 		Instant start = rangeStart.atStartOfDay(zone).toInstant();
@@ -317,9 +334,14 @@ public class StatisticsService {
 
 		int memberCount = accountMemberRepository.findByAccount_Id(accountId).size();
 		if (memberCount < MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS) {
-			log.debug("Anonymous feedback for account {} has only {} member(s), below the minimum of {} — withholding",
-				accountId, memberCount, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS);
-			return new OrganisationFeedbackResponse(memberCount, true, List.of());
+			if (platformAdmins.isAdmin(viewer)) {
+				log.info("Platform admin {} viewing anonymous feedback for account {} below the minimum of {} ({} member(s))",
+					viewer.getEmail(), accountId, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS, memberCount);
+			} else {
+				log.debug("Anonymous feedback for account {} has only {} member(s), below the minimum of {} — withholding",
+					accountId, memberCount, MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS);
+				return new OrganisationFeedbackResponse(memberCount, true, List.of());
+			}
 		}
 
 		return new OrganisationFeedbackResponse(memberCount, false, eventStatisticsRepository.findAnonymousFeedback(accountId));
@@ -334,9 +356,14 @@ public class StatisticsService {
 
 		int memberCount = memberUserIds.size();
 		if (memberCount < MIN_MEMBERS_FOR_AGGREGATE) {
-			log.debug("Aggregate for account {} has only {} member(s), below the minimum of {} — withholding numbers",
-				accountId, memberCount, MIN_MEMBERS_FOR_AGGREGATE);
-			return new AggregateStatisticsResponse(period, rangeStart, rangeEnd, memberCount, true, null, null, null, null);
+			if (platformAdmins.isAdmin(viewer)) {
+				log.info("Platform admin {} viewing an aggregate for account {} below the minimum of {} ({} member(s))",
+					viewer.getEmail(), accountId, MIN_MEMBERS_FOR_AGGREGATE, memberCount);
+			} else {
+				log.debug("Aggregate for account {} has only {} member(s), below the minimum of {} — withholding numbers",
+					accountId, memberCount, MIN_MEMBERS_FOR_AGGREGATE);
+				return new AggregateStatisticsResponse(period, rangeStart, rangeEnd, memberCount, true, null, null, null, null);
+			}
 		}
 
 		Instant start = rangeStart.atStartOfDay(zone).toInstant();
@@ -358,9 +385,14 @@ public class StatisticsService {
 
 		int memberCount = memberUserIds.size();
 		if (memberCount < MIN_MEMBERS_FOR_AGGREGATE) {
-			log.debug("Trend for account {} has only {} member(s), below the minimum of {} — withholding",
-				accountId, memberCount, MIN_MEMBERS_FOR_AGGREGATE);
-			return new AggregateTrendResponse(rangeStart, rangeEndExclusive, memberCount, true, null);
+			if (platformAdmins.isAdmin(viewer)) {
+				log.info("Platform admin {} viewing a trend for account {} below the minimum of {} ({} member(s))",
+					viewer.getEmail(), accountId, MIN_MEMBERS_FOR_AGGREGATE, memberCount);
+			} else {
+				log.debug("Trend for account {} has only {} member(s), below the minimum of {} — withholding",
+					accountId, memberCount, MIN_MEMBERS_FOR_AGGREGATE);
+				return new AggregateTrendResponse(rangeStart, rangeEndExclusive, memberCount, true, null);
+			}
 		}
 
 		ZoneId zone = userTimezones.resolve(viewer);

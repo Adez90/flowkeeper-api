@@ -11,6 +11,7 @@ import se.flowkeeper.api.account.AccountMember;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.AccountType;
 import se.flowkeeper.api.account.MemberRole;
+import se.flowkeeper.api.billing.PlatformAdmins;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.event.EventStatus;
 import se.flowkeeper.api.organisation.Department;
@@ -45,6 +46,7 @@ class StatisticsServiceTest {
 	@Mock DepartmentRepository departmentRepository;
 	@Mock GroupRepository groupRepository;
 	@Mock CurrentUserResolver currentUserResolver;
+	@Mock PlatformAdmins platformAdmins;
 
 	private final User user = new User("kc-subject-1", "Anders Johansson", "anders@example.com");
 	private final Account account = new Account(AccountType.PERSONAL, "Anders Johansson");
@@ -54,7 +56,7 @@ class StatisticsServiceTest {
 	private StatisticsService service() {
 		return new StatisticsService(
 			eventStatisticsRepository, accountMemberRepository, departmentRepository, groupRepository, currentUserResolver,
-			new UserTimezones());
+			new UserTimezones(), platformAdmins);
 	}
 
 	@Test
@@ -153,6 +155,33 @@ class StatisticsServiceTest {
 	}
 
 	@Test
+	void groupStatisticsShowsRealNumbersBelowMinimumSizeForAPlatformAdmin() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember coachMembership = new AccountMember(account, user, MemberRole.COACH, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(coachMembership));
+		when(groupRepository.findByIdAndAccount_Id(groupId, accountId)).thenReturn(Optional.of(group));
+		when(platformAdmins.isAdmin(user)).thenReturn(true);
+		// Same 2-member group as the withheld case above — below MIN_MEMBERS_FOR_AGGREGATE (4).
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(
+			new AccountMember(account, user, MemberRole.COACH, null, group),
+			new AccountMember(account, new User("kc-x", "X", "x@example.com"), MemberRole.MEMBER, null, group)));
+		when(eventStatisticsRepository.aggregateOverallForUsers(any(), any(), any(), any()))
+			.thenReturn(new OverallCounts(4L, 2L, 1L, 3.0, 0.5));
+
+		AggregateStatisticsResponse response = service().groupStatistics(jwt, accountId, groupId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.belowMinimumSize()).isFalse();
+		assertThat(response.memberCount()).isEqualTo(2);
+		assertThat(response.totalEvents()).isEqualTo(4);
+		assertThat(response.flowPercentage()).isEqualTo(50.0); // 1 of 2 completed in flow
+	}
+
+	@Test
 	void groupStatisticsVisibleToOwnCoachAboveMinimumSize() {
 		UUID accountId = UUID.randomUUID();
 		UUID groupId = UUID.randomUUID();
@@ -228,6 +257,28 @@ class StatisticsServiceTest {
 	}
 
 	@Test
+	void organisationTypeStatisticsShowsRealDataBelowTenMembersForAPlatformAdmin() {
+		UUID accountId = UUID.randomUUID();
+		AccountMember ownerMembership = new AccountMember(account, user, MemberRole.OWNER);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(ownerMembership));
+		when(platformAdmins.isAdmin(user)).thenReturn(true);
+		when(accountMemberRepository.findByAccount_Id(accountId)).thenReturn(List.of(
+			new AccountMember(account, user, MemberRole.OWNER),
+			new AccountMember(account, new User("kc-a", "A", "a@example.com"), MemberRole.MEMBER)));
+		when(eventStatisticsRepository.aggregateByTypeForUsers(any(), any(), any(), any()))
+			.thenReturn(List.of(new TypeCounts(UUID.randomUUID(), "Meeting", 2L, -1.0)));
+
+		OrganisationTypeStatisticsResponse response = service().organisationTypeStatistics(
+			jwt, accountId, StatisticsPeriod.DAY, LocalDate.of(2026, 3, 12));
+
+		assertThat(response.belowMinimumSize()).isFalse();
+		assertThat(response.memberCount()).isEqualTo(2);
+		assertThat(response.byType()).hasSize(1);
+	}
+
+	@Test
 	void organisationTypeStatisticsOnlyVisibleToOwner() {
 		UUID accountId = UUID.randomUUID();
 		Department department = new Department(account, "Engineering");
@@ -254,6 +305,25 @@ class StatisticsServiceTest {
 		assertThat(response.belowMinimumSize()).isTrue();
 		assertThat(response.memberCount()).isEqualTo(1);
 		assertThat(response.items()).isEmpty();
+	}
+
+	@Test
+	void organisationFeedbackShowsRealNotesBelowTenMembersForAPlatformAdmin() {
+		UUID accountId = UUID.randomUUID();
+		AccountMember ownerMembership = new AccountMember(account, user, MemberRole.OWNER);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(ownerMembership));
+		when(platformAdmins.isAdmin(user)).thenReturn(true);
+		when(accountMemberRepository.findByAccount_Id(accountId)).thenReturn(List.of(ownerMembership));
+		when(eventStatisticsRepository.findAnonymousFeedback(accountId)).thenReturn(List.of(
+			new AnonymousFeedbackItem("Meeting", "felt rushed", "still rushed", Instant.now())));
+
+		OrganisationFeedbackResponse response = service().organisationFeedback(jwt, accountId);
+
+		assertThat(response.belowMinimumSize()).isFalse();
+		assertThat(response.memberCount()).isEqualTo(1);
+		assertThat(response.items()).hasSize(1);
 	}
 
 	@Test
@@ -378,6 +448,30 @@ class StatisticsServiceTest {
 		assertThat(response.belowMinimumSize()).isTrue();
 		assertThat(response.memberCount()).isEqualTo(1);
 		assertThat(response.points()).isNull();
+	}
+
+	@Test
+	void groupTrendShowsRealPointsBelowMinimumSizeForAPlatformAdmin() {
+		UUID accountId = UUID.randomUUID();
+		UUID groupId = UUID.randomUUID();
+		Group group = new Group(account, null, "Backend team");
+		ReflectionTestUtils.setField(group, "id", groupId);
+		AccountMember coachMembership = new AccountMember(account, user, MemberRole.COACH, null, group);
+
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(accountId, user)).thenReturn(Optional.of(coachMembership));
+		when(groupRepository.findByIdAndAccount_Id(groupId, accountId)).thenReturn(Optional.of(group));
+		when(platformAdmins.isAdmin(user)).thenReturn(true);
+		when(accountMemberRepository.findByGroup_Id(groupId)).thenReturn(List.of(
+			new AccountMember(account, user, MemberRole.COACH, null, group)));
+		when(eventStatisticsRepository.findTrendRowsForUsers(any(), any(), any(), any())).thenReturn(List.of());
+
+		AggregateTrendResponse response = service().groupTrend(
+			jwt, accountId, groupId, LocalDate.of(2026, 3, 12), LocalDate.of(2026, 3, 15));
+
+		assertThat(response.belowMinimumSize()).isFalse();
+		assertThat(response.memberCount()).isEqualTo(1);
+		assertThat(response.points()).isNotNull();
 	}
 
 	@Test
