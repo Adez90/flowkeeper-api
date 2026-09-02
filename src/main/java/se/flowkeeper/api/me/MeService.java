@@ -9,7 +9,6 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.avatar.AvatarStorageService;
-import se.flowkeeper.api.billing.PlatformAdmins;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
@@ -43,18 +42,15 @@ public class MeService {
 	private final AccountMemberRepository accountMemberRepository;
 	private final CurrentUserResolver currentUserResolver;
 	private final AvatarStorageService avatarStorageService;
-	private final PlatformAdmins platformAdmins;
 
 	public MeService(UserRepository userRepository,
 			AccountMemberRepository accountMemberRepository,
 			CurrentUserResolver currentUserResolver,
-			AvatarStorageService avatarStorageService,
-			PlatformAdmins platformAdmins) {
+			AvatarStorageService avatarStorageService) {
 		this.userRepository = userRepository;
 		this.accountMemberRepository = accountMemberRepository;
 		this.currentUserResolver = currentUserResolver;
 		this.avatarStorageService = avatarStorageService;
-		this.platformAdmins = platformAdmins;
 	}
 
 	@Transactional(readOnly = true)
@@ -130,7 +126,7 @@ public class MeService {
 			user.getId(), user.getDisplayName(), user.getEmail(),
 			user.getTimezone(), user.getLocale(), user.getAvatarUrl(),
 			user.isNotifyInApp(), user.isNotifyPush(), user.isNotifyEmail(),
-			accounts, platformAdmins.isAdmin(user));
+			accounts);
 	}
 
 }

@@ -17,7 +17,6 @@ import se.flowkeeper.api.account.AccountMemberRepository;
 import se.flowkeeper.api.account.AccountType;
 import se.flowkeeper.api.account.MemberRole;
 import se.flowkeeper.api.avatar.AvatarStorageService;
-import se.flowkeeper.api.billing.PlatformAdmins;
 import se.flowkeeper.api.common.ValidationException;
 import se.flowkeeper.api.user.CurrentUserResolver;
 import se.flowkeeper.api.user.User;
@@ -45,8 +44,6 @@ class MeServiceTest {
 	CurrentUserResolver currentUserResolver;
 	@Mock
 	AvatarStorageService avatarStorageService;
-	@Mock
-	PlatformAdmins platformAdmins;
 
 	// uploadAvatar builds an absolute URL from the current request (Caddy's
 	// forwarded scheme/host in production) via ServletUriComponentsBuilder,
@@ -62,7 +59,7 @@ class MeServiceTest {
 	}
 
 	private MeService service() {
-		return new MeService(userRepository, accountMemberRepository, currentUserResolver, avatarStorageService, platformAdmins);
+		return new MeService(userRepository, accountMemberRepository, currentUserResolver, avatarStorageService);
 	}
 
 	@Test
@@ -84,23 +81,6 @@ class MeServiceTest {
 		assertThat(response.get().accounts()).hasSize(1);
 		assertThat(response.get().accounts().get(0).role()).isEqualTo("OWNER");
 		assertThat(response.get().accounts().get(0).type()).isEqualTo("PERSONAL");
-	}
-
-	@Test
-	void reportsPlatformAdminStatusFromPlatformAdmins() {
-		Jwt jwt = jwtFor("kc-subject-1");
-		User user = new User("kc-subject-1", "Anders Johansson", "anders@up2u.se");
-		Account account = new Account(AccountType.PERSONAL, "Anders Johansson");
-		AccountMember membership = new AccountMember(account, user, MemberRole.OWNER);
-
-		when(userRepository.findByKeycloakSubject("kc-subject-1")).thenReturn(Optional.of(user));
-		when(accountMemberRepository.findByUser(user)).thenReturn(List.of(membership));
-		when(platformAdmins.isAdmin(user)).thenReturn(true);
-
-		Optional<MeResponse> response = service().currentUser(jwt);
-
-		assertThat(response).isPresent();
-		assertThat(response.get().isPlatformAdmin()).isTrue();
 	}
 
 	@Test
