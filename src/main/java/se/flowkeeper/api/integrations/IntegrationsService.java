@@ -252,6 +252,21 @@ public class IntegrationsService {
 		return connection.getAccessToken();
 	}
 
+	/**
+	 * The caller's own already-imported external IDs for one provider. Only
+	 * needed for a provider with no server-side connection to drive
+	 * {@link #listImportableItems}'s own dedup (on-device calendar import:
+	 * the client reads its own calendar locally and has nothing to fetch
+	 * from here, but still needs to know what it's already imported so it
+	 * doesn't keep re-offering the same items).
+	 */
+	@Transactional(readOnly = true)
+	public List<String> listImportedExternalIds(Jwt jwt, UUID accountId, ExternalProvider provider) {
+		User user = currentUserResolver.require(jwt);
+		requireMembership(accountId, user);
+		return eventRepository.findExternalIdByUser_IdAndExternalProvider(user.getId(), provider);
+	}
+
 	/** Turns a set of previously-listed importable items into real, open events — each starts with no ingoing energy yet, see Event#start. */
 	@Transactional
 	public List<EventResponse> importEvents(Jwt jwt, ImportEventsRequest request) {

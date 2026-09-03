@@ -139,6 +139,29 @@ class IntegrationsServiceTest {
 	}
 
 	@Test
+	void listImportedExternalIdsReturnsTheCallersOwnPreviouslyImportedIds() {
+		AccountMember membership = mock(AccountMember.class);
+		lenient().when(membership.getAccount()).thenReturn(account);
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(account.getId(), user)).thenReturn(Optional.of(membership));
+		when(eventRepository.findExternalIdByUser_IdAndExternalProvider(user.getId(), ExternalProvider.APPLE_CALENDAR))
+			.thenReturn(List.of("event-1", "event-2"));
+
+		List<String> ids = service(false).listImportedExternalIds(jwt, account.getId(), ExternalProvider.APPLE_CALENDAR);
+
+		assertThat(ids).containsExactly("event-1", "event-2");
+	}
+
+	@Test
+	void listImportedExternalIdsRejectsANonMember() {
+		when(currentUserResolver.require(jwt)).thenReturn(user);
+		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service(false).listImportedExternalIds(jwt, account.getId(), ExternalProvider.APPLE_CALENDAR))
+			.isInstanceOf(AccessDeniedException.class);
+	}
+
+	@Test
 	void startAuthorizationRejectsANonMember() {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(accountMemberRepository.findByAccount_IdAndUser(any(), any())).thenReturn(Optional.empty());

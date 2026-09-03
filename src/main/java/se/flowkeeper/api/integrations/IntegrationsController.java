@@ -61,6 +61,13 @@ public class IntegrationsController {
 		return integrationsService.listImportableItems(jwt, accountId, date);
 	}
 
+	/** The caller's own already-imported external IDs for one provider — for a client-only provider (no server-side connection) to dedup locally. */
+	@GetMapping("/api/v1/integrations/imported-external-ids")
+	public List<String> listImportedExternalIds(
+			@AuthenticationPrincipal Jwt jwt, @RequestParam UUID accountId, @RequestParam ExternalProvider provider) {
+		return integrationsService.listImportedExternalIds(jwt, accountId, provider);
+	}
+
 	@PostMapping("/api/v1/integrations/import")
 	public List<EventResponse> importEvents(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ImportEventsRequest request) {
 		return integrationsService.importEvents(jwt, request);
