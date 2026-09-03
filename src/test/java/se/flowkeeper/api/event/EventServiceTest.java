@@ -226,16 +226,19 @@ class EventServiceTest {
 	}
 
 	@Test
-	void updateSharingLetsTheOwnerOptTheirEventIn() {
+	void updateSharingLetsTheOwnerOptEachNoteInIndependently() {
 		Event event = new Event(user, account, defaultEventType(), (short) 3, "note");
 
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
 
-		EventResponse response = service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true));
+		// Only the ingoing (pre-activity) note opted in — the outgoing one stays private.
+		EventResponse response = service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true, false));
 
-		assertThat(response.shareAnonymously()).isTrue();
-		assertThat(event.isShareAnonymously()).isTrue();
+		assertThat(response.shareIngoingNoteAnonymously()).isTrue();
+		assertThat(response.shareOutgoingNoteAnonymously()).isFalse();
+		assertThat(event.isShareIngoingNoteAnonymously()).isTrue();
+		assertThat(event.isShareOutgoingNoteAnonymously()).isFalse();
 	}
 
 	@Test
@@ -246,7 +249,7 @@ class EventServiceTest {
 		when(currentUserResolver.require(jwt)).thenReturn(user);
 		when(eventRepository.findById(any())).thenReturn(Optional.of(event));
 
-		assertThatThrownBy(() -> service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true)))
+		assertThatThrownBy(() -> service().updateSharing(jwt, UUID.randomUUID(), new UpdateEventSharingRequest(true, true)))
 			.isInstanceOf(AccessDeniedException.class);
 	}
 

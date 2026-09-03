@@ -65,11 +65,12 @@ class OrganisationFeedbackIntegrationTest extends AbstractIntegrationTest {
 		UUID sharedEventId = logAndCompleteOneEvent(accountId, firstMember, "felt great about this one", "energised");
 		logAndCompleteOneEvent(accountId, firstMember, "a private note", "kept private"); // never opted in
 
+		// Opt in only the pre-activity note — the post-activity one stays private.
 		mockMvc.perform(patch("/api/v1/events/" + sharedEventId + "/sharing")
 				.with(jwt().jwt(firstMember))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-					{"shareAnonymously":true}
+					{"shareIngoingNoteAnonymously":true,"shareOutgoingNoteAnonymously":false}
 					"""))
 			.andExpect(status().isOk());
 
@@ -85,7 +86,7 @@ class OrganisationFeedbackIntegrationTest extends AbstractIntegrationTest {
 		JsonNode items = body.get("items");
 		assertThat(items).hasSize(1);
 		assertThat(items.get(0).get("ingoingNote").asText()).isEqualTo("felt great about this one");
-		assertThat(items.get(0).has("outgoingNote")).isTrue();
+		assertThat(items.get(0).get("outgoingNote").isNull()).isTrue();
 	}
 
 	@Test
@@ -103,7 +104,7 @@ class OrganisationFeedbackIntegrationTest extends AbstractIntegrationTest {
 				.with(jwt().jwt(asOwner))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-					{"shareAnonymously":true}
+					{"shareIngoingNoteAnonymously":true,"shareOutgoingNoteAnonymously":true}
 					"""))
 			.andExpect(status().isOk());
 
@@ -145,7 +146,7 @@ class OrganisationFeedbackIntegrationTest extends AbstractIntegrationTest {
 				.with(jwt().jwt(asMember))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-					{"shareAnonymously":true}
+					{"shareIngoingNoteAnonymously":true,"shareOutgoingNoteAnonymously":true}
 					"""))
 			.andExpect(status().isForbidden());
 	}

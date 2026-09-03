@@ -145,18 +145,25 @@ public interface EventStatisticsRepository extends Repository<Event, UUID> {
 		@Param("accountId") UUID accountId, @Param("userIds") Collection<UUID> userIds,
 		@Param("start") Instant start, @Param("end") Instant end);
 
-	// Every event its own owner has opted in to anonymous organisation-wide
-	// feedback (Event.shareAnonymously) — deliberately selects no user/event
-	// id, only the type label, the notes themselves, and when it happened.
-	// Not time-boxed by period like the other aggregates: feedback is a
-	// standing "what's working, what's not" view, not a per-day/week/month
+	// Every event its own owner has opted at least one note in to anonymous
+	// organisation-wide feedback (Event.shareIngoingNoteAnonymously /
+	// shareOutgoingNoteAnonymously — independent per note) — deliberately
+	// selects no user/event id, only the type label, whichever note(s) were
+	// actually opted in, and when it happened. A note not opted in comes
+	// back null rather than the row being split or omitted, so a "shared
+	// only the post-note" item still shows its type/time with just the one
+	// note. Not time-boxed by period like the other aggregates: feedback is
+	// a standing "what's working, what's not" view, not a per-day/week/month
 	// rollup.
 	@Query("""
 		select new se.flowkeeper.api.statistics.AnonymousFeedbackItem(
-			et.label, e.ingoingNote, e.outgoingNote, e.startedAt
+			et.label,
+			case when e.shareIngoingNoteAnonymously = true then e.ingoingNote else null end,
+			case when e.shareOutgoingNoteAnonymously = true then e.outgoingNote else null end,
+			e.startedAt
 		)
 		from Event e join e.eventType et
-		where e.account.id = :accountId and e.shareAnonymously = true
+		where e.account.id = :accountId and (e.shareIngoingNoteAnonymously = true or e.shareOutgoingNoteAnonymously = true)
 		order by e.startedAt desc
 		""")
 	List<AnonymousFeedbackItem> findAnonymousFeedback(@Param("accountId") UUID accountId);

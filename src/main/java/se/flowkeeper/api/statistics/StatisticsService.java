@@ -376,7 +376,8 @@ public class StatisticsService {
 	/**
 	 * The organisation OWNER's "what's working, what's not" view: every
 	 * event note its own owner has opted in to anonymous sharing
-	 * (Event.shareAnonymously), never attributed back to whoever wrote it.
+	 * (Event.shareIngoingNoteAnonymously / shareOutgoingNoteAnonymously,
+	 * independently per note), never attributed back to whoever wrote it.
 	 * Gated the same as the by-type breakdown: withheld below
 	 * MIN_MEMBERS_FOR_ANONYMOUS_TYPE_STATS members. Not time-boxed by
 	 * period — a standing view, not a per-day/week/month rollup.

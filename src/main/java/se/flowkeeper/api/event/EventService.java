@@ -235,8 +235,9 @@ public class EventService {
 			throw new AccessDeniedException("Not your event");
 		}
 
-		event.updateAnonymousSharing(request.shareAnonymously());
-		log.info("User {} set share-anonymously={} on event {}", user.getId(), request.shareAnonymously(), eventId);
+		event.updateAnonymousSharing(request.shareIngoingNoteAnonymously(), request.shareOutgoingNoteAnonymously());
+		log.info("User {} set share-ingoing-note-anonymously={} share-outgoing-note-anonymously={} on event {}",
+			user.getId(), request.shareIngoingNoteAnonymously(), request.shareOutgoingNoteAnonymously(), eventId);
 
 		return EventResponse.from(event);
 	}

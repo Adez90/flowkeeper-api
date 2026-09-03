@@ -62,8 +62,11 @@ public class Event {
 	@Column(name = "outgoing_note")
 	private String outgoingNote;
 
-	@Column(name = "share_anonymously", nullable = false)
-	private boolean shareAnonymously;
+	@Column(name = "share_ingoing_note_anonymously", nullable = false)
+	private boolean shareIngoingNoteAnonymously;
+
+	@Column(name = "share_outgoing_note_anonymously", nullable = false)
+	private boolean shareOutgoingNoteAnonymously;
 
 	@Column(name = "started_at", nullable = false)
 	private Instant startedAt;
@@ -144,9 +147,10 @@ public class Event {
 		this.status = EventStatus.COMPLETED;
 	}
 
-	/** Only the event's own owner may opt its notes in or out of anonymous organisation-wide feedback — see AnonymousFeedbackService. */
-	public void updateAnonymousSharing(boolean shareAnonymously) {
-		this.shareAnonymously = shareAnonymously;
+	/** Only the event's own owner may opt each note in or out of anonymous organisation-wide feedback, independently — see AnonymousFeedbackService. */
+	public void updateAnonymousSharing(boolean shareIngoingNoteAnonymously, boolean shareOutgoingNoteAnonymously) {
+		this.shareIngoingNoteAnonymously = shareIngoingNoteAnonymously;
+		this.shareOutgoingNoteAnonymously = shareOutgoingNoteAnonymously;
 	}
 
 	/**
@@ -216,8 +220,12 @@ public class Event {
 		return outgoingNote;
 	}
 
-	public boolean isShareAnonymously() {
-		return shareAnonymously;
+	public boolean isShareIngoingNoteAnonymously() {
+		return shareIngoingNoteAnonymously;
+	}
+
+	public boolean isShareOutgoingNoteAnonymously() {
+		return shareOutgoingNoteAnonymously;
 	}
 
 	public Instant getStartedAt() {
